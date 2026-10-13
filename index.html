@@ -1,0 +1,930 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Motor de mercados</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<style>
+/* Layout: cabecera con resumen → pestañas por estado (por revisar, rechazados, aprobados,
+   exportados) → filtros → rejilla. Cada mercado = tarjeta tal como la vería el usuario final
+   + ficha interna. El detalle lateral concentra las acciones (editar, aprobar, exportar).
+   Colores y fuente: panel/theme.json (inyectados abajo). */
+:root{--bg:#F2F4F6;--surface:#FFFFFF;--surface-2:#ECEFF2;--ink:#17212B;--ink-2:#5A6672;--line:#D8DEE4;--accent:#0F6B66;--accent-ink:#FFFFFF;--accent-soft:#DDEFEC;--yes:#1C7448;--yes-soft:#E1F2E8;--no:#AE3F2B;--no-soft:#F7E5E0;--warn:#8F5B00;--warn-soft:#FAEFD6;--font-body:'Instrument Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#0E1317;--surface:#161E24;--surface-2:#1D272F;--ink:#E5EBF0;--ink-2:#98A6B3;--line:#2A3640;--accent:#53B5AC;--accent-ink:#08201E;--accent-soft:#153230;--yes:#5DC28E;--yes-soft:#16301F;--no:#EE8B74;--no-soft:#3A1E18;--warn:#E3B055;--warn-soft:#33280F;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0E1317;--surface:#161E24;--surface-2:#1D272F;--ink:#E5EBF0;--ink-2:#98A6B3;--line:#2A3640;--accent:#53B5AC;--accent-ink:#08201E;--accent-soft:#153230;--yes:#5DC28E;--yes-soft:#16301F;--no:#EE8B74;--no-soft:#3A1E18;--warn:#E3B055;--warn-soft:#33280F;color-scheme:dark}
+:root {
+  --radius-card: 14px;
+  --radius-control: 999px;
+  --radius-small: 8px;
+  --fs-xs: .75rem; --fs-sm: .8125rem; --fs-md: .9375rem; --fs-lg: 1.0625rem; --fs-xl: 1.5rem;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font-family: var(--font-body); font-size: var(--fs-md); line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1240px; margin: 0 auto; padding-inline: 20px; padding-block: 24px 64px; }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* Cabecera */
+header.top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; }
+header.top h1 { margin: 0; font-size: var(--fs-xl); font-weight: 700; letter-spacing: -.01em; text-wrap: balance; }
+header.top p { margin: 4px 0 0; color: var(--ink-2); font-size: var(--fs-sm); }
+.stats { display: flex; flex-wrap: wrap; gap: 8px; }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-small); padding: 8px 12px; min-width: 92px; }
+.stat b { display: block; font-size: var(--fs-lg); font-variant-numeric: tabular-nums; }
+.stat span { font-size: var(--fs-xs); color: var(--ink-2); }
+.mode { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; font-size: var(--fs-sm); color: var(--ink-2); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-small); padding: 10px 14px; }
+.mode b { color: var(--ink); font-weight: 600; }
+.mode .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--yes); display: inline-block; margin-right: 6px; }
+.mode.readonly .dot { background: var(--warn); }
+.mode code { background: var(--surface-2); padding: 1px 6px; border-radius: 4px; font-size: 12px; }
+
+/* Pestañas y filtros */
+.tabs { display: flex; gap: 4px; margin-top: 20px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.tab { background: none; border: 0; padding: 10px 14px; font-weight: 600; color: var(--ink-2); border-bottom: 2px solid transparent; margin-bottom: -1px; cursor: pointer; white-space: nowrap; }
+.tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+.tab .count { font-weight: 500; color: var(--ink-2); margin-left: 4px; }
+.tab-note { margin: 14px 0 0; color: var(--ink-2); font-size: var(--fs-sm); }
+.toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 16px 0 20px; }
+.search { flex: 1 1 220px; min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-control); padding: 8px 14px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip-btn { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-control); padding: 6px 12px; font-size: var(--fs-sm); cursor: pointer; }
+.chip-btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.select { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-control); padding: 7px 12px; font-size: var(--fs-sm); }
+
+/* Rejilla */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px; align-items: start; }
+.item { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.empty { padding: 48px 16px; text-align: center; color: var(--ink-2); border: 1px dashed var(--line); border-radius: var(--radius-card); grid-column: 1 / -1; }
+
+/* Tarjeta de mercado (vista previa de la UI final) */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); padding: 16px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 1px 2px rgba(15, 30, 40, .04); }
+.card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: var(--fs-xs); color: var(--ink-2); }
+.cat { font-weight: 600; color: var(--accent); }
+.card h3 { margin: 0; font-size: var(--fs-lg); line-height: 1.3; font-weight: 650; text-wrap: balance; overflow-wrap: anywhere; }
+.closes { display: flex; align-items: center; gap: 6px; font-size: var(--fs-sm); color: var(--ink-2); }
+.closes svg { flex: none; }
+.closes.pending { color: var(--warn); }
+.bin { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.bin button { border: 0; border-radius: 10px; padding: 11px 12px; font-weight: 650; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; cursor: default; min-width: 0; }
+.bin .yes { background: var(--yes-soft); color: var(--yes); }
+.bin .no { background: var(--no-soft); color: var(--no); }
+.bin .price { font-variant-numeric: tabular-nums; font-weight: 600; }
+.cats { display: flex; flex-direction: column; gap: 6px; }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; font-size: var(--fs-sm); }
+.row .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .pct { font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.row button { border: 1px solid var(--line); background: var(--surface-2); border-radius: var(--radius-control); padding: 3px 10px; font-size: var(--fs-xs); font-weight: 600; cursor: default; }
+.more { font-size: var(--fs-xs); color: var(--ink-2); }
+.card-foot { display: flex; justify-content: space-between; gap: 12px; font-size: var(--fs-xs); color: var(--ink-2); border-top: 1px solid var(--line); padding-top: 10px; }
+.card-foot span:first-child { min-width: 0; }
+.card-foot span:last-child { flex: none; white-space: nowrap; }
+.reject-banner { background: var(--no-soft); color: var(--no); border-radius: var(--radius-small); padding: 8px 10px; font-size: var(--fs-sm); font-weight: 600; }
+
+/* Ficha interna */
+.ficha { background: var(--surface-2); border-radius: var(--radius-small); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; font-size: var(--fs-sm); }
+.ficha-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.score { display: flex; align-items: center; gap: 8px; }
+.meter { width: 84px; height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.meter i { display: block; height: 100%; background: var(--accent); }
+.flags { display: flex; flex-wrap: wrap; gap: 6px; }
+.flag { font-size: var(--fs-xs); font-weight: 600; padding: 2px 8px; border-radius: var(--radius-control); background: var(--surface); border: 1px solid var(--line); color: var(--ink-2); }
+.flag.warn { background: var(--warn-soft); border-color: transparent; color: var(--warn); }
+.flag.ok { background: var(--accent-soft); border-color: transparent; color: var(--accent); }
+.flag.good { background: var(--yes-soft); border-color: transparent; color: var(--yes); }
+.flag.bad { background: var(--no-soft); border-color: transparent; color: var(--no); }
+.link-btn { background: none; border: 0; padding: 0; color: var(--accent); font-weight: 600; cursor: pointer; font-size: var(--fs-sm); }
+.who { font-size: var(--fs-xs); color: var(--ink-2); }
+
+/* Errores de borrador */
+.rej { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); padding: 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.rej h3 { margin: 0; font-size: var(--fs-md); overflow-wrap: anywhere; }
+.rej ul { margin: 0; padding-left: 18px; color: var(--no); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.rej .meta { font-size: var(--fs-xs); color: var(--ink-2); }
+.section-title { margin: 32px 0 6px; font-size: var(--fs-md); font-weight: 650; }
+.section-note { margin: 0 0 14px; color: var(--ink-2); font-size: var(--fs-sm); }
+
+/* Detalle */
+.scrim { position: fixed; inset: 0; background: rgba(8, 14, 18, .45); z-index: 10; }
+.drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(600px, 100%); background: var(--surface); z-index: 11; display: flex; flex-direction: column; border-left: 1px solid var(--line); padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+.drawer-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 18px 20px 12px; }
+.drawer-head h2 { margin: 0; font-size: var(--fs-lg); text-wrap: balance; overflow-wrap: anywhere; }
+.drawer-head small { color: var(--ink-2); display: block; margin-top: 4px; font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.close-x { background: var(--surface-2); border: 0; border-radius: var(--radius-control); width: 32px; height: 32px; cursor: pointer; flex: none; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 20px 14px; align-items: center; }
+.notice { margin: 0 20px 12px; border-radius: var(--radius-small); padding: 10px 12px; font-size: var(--fs-sm); display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; }
+.notice.info { background: var(--accent-soft); color: var(--ink); }
+.notice.warn { background: var(--warn-soft); color: var(--ink); }
+.notice.bad { background: var(--no-soft); color: var(--ink); }
+.btn { border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius-control); padding: 7px 14px; font-weight: 600; font-size: var(--fs-sm); cursor: pointer; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.danger { color: var(--no); }
+.btn[disabled] { opacity: .5; cursor: not-allowed; }
+.hint { font-size: var(--fs-xs); color: var(--ink-2); }
+.drawer-tabs { display: flex; gap: 2px; padding: 0 12px; border-bottom: 1px solid var(--line); border-top: 1px solid var(--line); overflow-x: auto; }
+.drawer-body { padding: 18px 20px 32px; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; min-height: 0; flex: 1; }
+.drawer-body h4 { margin: 0 0 6px; font-size: var(--fs-sm); color: var(--ink-2); font-weight: 600; }
+.drawer-body ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.drawer-body p { margin: 0; }
+.drawer-body a { color: var(--accent); }
+.kv { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 6px 12px; font-size: var(--fs-sm); }
+.kv dt { color: var(--ink-2); }
+.kv dd { margin: 0; overflow-wrap: anywhere; }
+.fact { font-size: var(--fs-sm); }
+.fact .when { color: var(--ink-2); font-size: var(--fs-xs); }
+.hist { list-style: none; padding: 0 !important; gap: 10px !important; }
+.hist li { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 10px; font-size: var(--fs-sm); }
+.hist time { color: var(--ink-2); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+pre.json { margin: 0; background: var(--surface-2); border-radius: var(--radius-small); padding: 12px; font-size: 12px; line-height: 1.5; overflow: auto; max-height: 60vh; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; overflow-wrap: anywhere; }
+.json-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* Formulario de edición */
+.form { display: flex; flex-direction: column; gap: 14px; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field label { font-size: var(--fs-sm); font-weight: 600; }
+.field .sub { font-size: var(--fs-xs); color: var(--ink-2); }
+.field input, .field textarea { width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-small); padding: 8px 10px; }
+.field textarea { min-height: 72px; resize: vertical; }
+.field.changed input, .field.changed textarea { border-color: var(--accent); }
+.counter { font-size: var(--fs-xs); color: var(--ink-2); text-align: right; font-variant-numeric: tabular-nums; }
+.counter.over { color: var(--no); font-weight: 600; }
+.form-actions { display: flex; flex-wrap: wrap; gap: 8px; position: sticky; bottom: -32px; background: var(--surface); padding: 12px 0; border-top: 1px solid var(--line); }
+
+/* Avisos */
+.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(20px + env(safe-area-inset-bottom, 0px)); z-index: 20; background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: var(--radius-small); font-size: var(--fs-sm); max-width: min(560px, calc(100% - 32px)); box-shadow: 0 6px 20px rgba(0,0,0,.2); }
+.toast.bad { background: var(--no); color: #fff; }
+footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
+
+/* Acceso */
+.login { max-width: 380px; margin: 12vh auto 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); padding: 24px; display: flex; flex-direction: column; gap: 14px; }
+.login h1 { margin: 0; font-size: var(--fs-xl); }
+.login p { margin: 0; color: var(--ink-2); font-size: var(--fs-sm); }
+.login input, .modal input, .modal textarea, .modal select { width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-small); padding: 10px 12px; }
+.login .btn, .modal .btn.primary { padding: 10px 16px; font-size: var(--fs-md); }
+.login .err { color: var(--no); font-size: var(--fs-sm); }
+.top-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+/* Plazo de exportación */
+.deadline { font-size: var(--fs-xs); font-weight: 600; }
+.deadline.soon { color: var(--warn); }
+.deadline.urgent { color: var(--no); }
+/* Peticiones */
+.req { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.req p { margin: 0; overflow-wrap: anywhere; }
+.req .meta { font-size: var(--fs-xs); color: var(--ink-2); }
+.modal { position: fixed; z-index: 12; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(520px, calc(100% - 24px)); max-height: calc(100% - 24px); overflow: auto; background: var(--surface); border-radius: var(--radius-card); border: 1px solid var(--line); padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+.modal h2 { margin: 0; font-size: var(--fs-lg); }
+.modal label { font-size: var(--fs-sm); font-weight: 600; display: flex; flex-direction: column; gap: 4px; }
+.modal textarea { min-height: 96px; resize: vertical; }
+.match { font-size: var(--fs-sm); background: var(--warn-soft); border-radius: var(--radius-small); padding: 8px 10px; }
+
+@media (max-width: 480px) {
+  .wrap { padding-inline: 16px; }
+  .grid { grid-template-columns: minmax(0, 1fr); }
+  .kv, .hist li { grid-template-columns: minmax(0, 1fr); }
+  .kv dt { margin-top: 6px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .drawer { animation: slide .18s ease-out; }
+  @keyframes slide { from { transform: translateX(16px); opacity: .6; } to { transform: none; opacity: 1; } }
+}
+</style>
+
+<section class="login" id="login" hidden>
+  <h1>Motor de mercados</h1>
+  <p>Entra con el correo y la contraseña que te dio el administrador.</p>
+  <form id="login-form" class="form">
+    <input id="l-email" type="email" autocomplete="username" placeholder="Correo" required>
+    <input id="l-pass" type="password" autocomplete="current-password" placeholder="Contraseña" required>
+    <button class="btn primary" type="submit" id="l-go">Entrar</button>
+    <div class="err" id="l-err" role="alert"></div>
+  </form>
+</section>
+<div class="wrap" id="app" hidden>
+  <header class="top">
+    <div>
+      <h1>Mercados</h1>
+      <p id="subtitle"></p>
+    </div>
+    <div class="top-actions"><div class="stats" id="stats"></div></div>
+  </header>
+  <div class="mode" id="mode"></div>
+  <div class="toolbar" style="margin-bottom:0"><button class="btn primary" id="ask-btn">Pedir mercado</button><select class="select" id="country" aria-label="País"></select></div>
+
+  <div class="tabs" role="tablist" id="tabs">
+    <button class="tab" role="tab" data-col="review" aria-selected="true">Por revisar<span class="count" data-count="review"></span></button>
+    <button class="tab" role="tab" data-col="rejected" aria-selected="false">Rechazados<span class="count" data-count="rejected"></span></button>
+    <button class="tab" role="tab" data-col="approved" aria-selected="false">Aprobados<span class="count" data-count="approved"></span></button>
+    <button class="tab" role="tab" data-col="exported" aria-selected="false">Exportados<span class="count" data-count="exported"></span></button>
+    <button class="tab" role="tab" data-col="expired" aria-selected="false">Vencidos<span class="count" data-count="expired"></span></button>
+    <button class="tab" role="tab" data-col="requests" aria-selected="false">Peticiones<span class="count" data-count="requests"></span></button>
+  </div>
+  <p class="tab-note" id="tab-note"></p>
+
+  <div class="toolbar">
+    <input class="search" id="q" type="search" placeholder="Buscar por título, equipo o persona" aria-label="Buscar">
+    <div class="chips" id="filters">
+      <button class="chip-btn" data-f="all" aria-pressed="true">Todos</button>
+      <button class="chip-btn" data-f="needs" aria-pressed="false">Cierre por fijar</button>
+      <button class="chip-btn" data-f="edited" aria-pressed="false">Editados</button>
+      <button class="chip-btn" data-f="incoming" aria-pressed="false">Versión nueva del motor</button>
+      <button class="chip-btn" data-f="single" aria-pressed="false">Una fuente</button>
+    </div>
+    <select class="select" id="cat" aria-label="Categoría"></select>
+    <select class="select" id="sort" aria-label="Ordenar">
+      <option value="deadline">Vence antes</option>
+      <option value="priority">Mayor prioridad</option>
+      <option value="close">Cierra antes</option>
+      <option value="recent">Actividad reciente</option>
+    </select>
+  </div>
+
+  <div class="grid" id="grid"></div>
+  <section id="errors-section" hidden>
+    <h2 class="section-title">Borradores que no se pudieron construir</h2>
+    <p class="section-note">Errores de formato, fuentes desconocidas o duplicados detectados al ejecutar el motor en este equipo. Hay que corregir el borrador y volver a ejecutarlo.</p>
+    <div class="grid" id="err-grid"></div>
+  </section>
+
+  <footer class="foot" id="foot"></footer>
+</div>
+
+<div class="scrim" id="scrim" hidden></div>
+<aside class="drawer" id="drawer" hidden role="dialog" aria-modal="true" aria-labelledby="d-title">
+  <div class="drawer-head">
+    <div><h2 id="d-title"></h2><small id="d-id"></small></div>
+    <button class="close-x" id="d-close" aria-label="Cerrar detalle">✕</button>
+  </div>
+  <div id="d-notices"></div>
+  <div class="actions" id="d-actions"></div>
+  <div class="drawer-tabs" role="tablist" id="d-tabs"></div>
+  <div class="drawer-body" id="d-body"></div>
+</aside>
+<div class="scrim" id="m-scrim" hidden></div>
+<div class="modal" id="ask" role="dialog" aria-modal="true" aria-labelledby="ask-title" hidden>
+  <h2 id="ask-title">Pedir un mercado</h2>
+  <p class="hint">El motor lo busca en su próxima corrida (como mucho en una hora) y verás el resultado en la pestaña Peticiones.</p>
+  <label>Qué buscar<textarea id="a-text" maxlength="1000" placeholder="Ej.: el juego Caracas–Magallanes del sábado, o más mercados de Miss Venezuela"></textarea></label>
+  <label>País<select id="a-country"></select></label>
+  <label>Tipo<select id="a-kind"><option value="specific">Un evento concreto</option><option value="open">Búsqueda abierta (más mercados de un tema)</option></select></label>
+  <label>Enlace (opcional)<input id="a-url" type="url" placeholder="https://"></label>
+  <div id="a-match"></div>
+  <div class="form-actions" style="position:static"><button class="btn primary" id="a-send">Enviar petición</button><button class="btn" id="a-cancel">Cancelar</button></div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script id="motor-config" type="application/json">{"supabase_url": "https://kpchxnzvujunkaazqtpc.supabase.co", "supabase_key": "sb_publishable_sQ0iFFhvSuu8LgcKIx7Zbg_42CHrg9H"}</script>
+<script>
+(function () {
+  "use strict";
+  var CFG = JSON.parse(document.getElementById("motor-config").textContent) || {};
+  var SB = window.supabase.createClient(CFG.supabase_url, CFG.supabase_key, { auth: { persistSession: true, autoRefreshToken: true } });
+  var S = {
+    interactive: true, me: null, user: null, store: "Supabase", exportEndpoint: false,
+    records: [], errors: [], requests: [],
+    col: "review", filter: "all", q: "", cat: "", country: "", sort: "deadline",
+    open: null, section: "rules", editing: false, busy: false, lastSync: null
+  };
+  try { var saved = JSON.parse(localStorage.getItem("motor-panel") || "{}"); if (saved.sort) S.sort = saved.sort; if (saved.country != null) S.country = saved.country; } catch (e) {}
+  function savePrefs() { try { localStorage.setItem("motor-panel", JSON.stringify({ sort: S.sort, country: S.country })); } catch (e) {} }
+
+  var COLS = {
+    review: { label: "Por revisar", note: "Mercados que el motor propone. Revísalos, edítalos si hace falta y apruébalos." },
+    rejected: { label: "Rechazados", note: "Construidos completos pero excluidos por las reglas del país o por daño, o descartados por un editor. Puedes aprobarlos igualmente o restaurarlos." },
+    approved: { label: "Aprobados", note: "Listos para exportar a la plataforma." },
+    exported: { label: "Exportados", note: "Ya exportados. Si editas uno, vuelve a revisión y se exporta como versión nueva." },
+    expired: { label: "Vencidos", note: "Ya no da tiempo a publicarlos: falta menos que el margen de exportación para su cierre." },
+    requests: { label: "Peticiones", note: "Lo que el equipo ha pedido al motor y qué pasó con cada petición." }
+  };
+  var REQ_STATUS = { queued: ["En cola", "warn"], working: ["Buscando", "ok"], created: ["Creado", "good"], existing: ["Ya existía", "good"],
+    improved: ["Mejorado", "good"], not_possible: ["No se pudo", "bad"] };
+  var CAT_LABELS = {
+    "deportes.beisbol.lvbp": "Béisbol LVBP", "deportes.beisbol.mlb": "MLB", "deportes.premios": "Premios",
+    "entretenimiento.certamenes": "Certámenes", "entretenimiento.musica.eventos": "Música y eventos",
+    "institucional.anuncios": "Institucional", "economia.indicadores_oficiales": "Economía"
+  };
+  var DAYS = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
+  var MONTHS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+  var ACTION_LABELS = {
+    created: "Propuesto por el motor", also_proposed: "Otra persona generó el mismo mercado", claimed: "Empezó a revisarlo",
+    released: "Dejó de revisarlo", edited: "Editó", approved: "Aprobó", unapproved: "Devolvió a revisión", discarded: "Descartó",
+    restored: "Restauró", exported: "Exportó", export_skipped: "Exportación sin cambios", engine_updated: "El motor lo actualizó",
+    engine_incoming: "Versión nueva del motor", engine_accepted: "Aceptó la versión nueva del motor", engine_ignored: "Ignoró la versión nueva del motor"
+  };
+  var COUNTRY_NAMES = { VE: "Venezuela", CO: "Colombia", AR: "Argentina", MX: "México", PE: "Perú", CL: "Chile", EC: "Ecuador", DO: "República Dominicana", PA: "Panamá", ES: "España", US: "Estados Unidos" };
+  function countryName(cc) { return COUNTRY_NAMES[cc] || cc; }
+
+  function $(id) { return document.getElementById(id); }
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function catLabel(c) {
+    if (CAT_LABELS[c]) return CAT_LABELS[c];
+    var last = c.split(".").pop().replace(/_/g, " ");
+    return last.charAt(0).toUpperCase() + last.slice(1);
+  }
+  function offsetMinutes(iso) {
+    var m = /([+-])(\d{2}):(\d{2})$/.exec(iso || "");
+    return m ? (m[1] === "-" ? -1 : 1) * (parseInt(m[2], 10) * 60 + parseInt(m[3], 10)) : 0;
+  }
+  function parts(iso, off) {
+    var o = off == null ? offsetMinutes(iso) : off;
+    var d = new Date(Date.parse(iso) + o * 60000);
+    return { day: DAYS[d.getUTCDay()], date: d.getUTCDate(), mon: MONTHS[d.getUTCMonth()], h: d.getUTCHours(), mi: d.getUTCMinutes(), y: d.getUTCFullYear(), m: d.getUTCMonth() + 1 };
+  }
+  function fmtDate(iso, dayOnly) {
+    if (!iso) return "—";
+    var p = parts(iso), h = p.h % 12 || 12, ap = p.h < 12 ? "a. m." : "p. m.";
+    if (dayOnly) return p.day + " " + p.date + "-" + p.mon;
+    return p.day + " " + p.date + "-" + p.mon + ", " + h + ":" + String(p.mi).padStart(2, "0") + " " + ap;
+  }
+  function fmtUTC(iso) {
+    if (!iso) return "—";
+    var p = parts(iso, -new Date().getTimezoneOffset());
+    return p.date + "-" + p.mon + " " + String(p.h).padStart(2, "0") + ":" + String(p.mi).padStart(2, "0");
+  }
+  function relative(iso) {
+    if (!iso) return "";
+    var diff = Date.parse(iso) - Date.now();
+    if (diff <= 0) return "cerrado";
+    var rtf = new Intl.RelativeTimeFormat("es", { numeric: "auto" });
+    var hrs = diff / 36e5;
+    if (hrs < 1) return rtf.format(Math.round(diff / 6e4), "minute");
+    if (hrs < 48) return rtf.format(Math.round(hrs), "hour");
+    return rtf.format(Math.round(hrs / 24), "day");
+  }
+  function pct(p) { return Math.round(p * 1000) / 10 + "%"; }
+  function cents(p) { return Math.round(p * 100) + "¢"; }
+  var toastTimer = null;
+  function toast(msg, bad) {
+    var t = $("toast"); t.textContent = msg; t.className = "toast" + (bad ? " bad" : ""); t.hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(function () { t.hidden = true; }, bad ? 6000 : 3000);
+  }
+
+  // ---------------------------------------------------------------- red (Supabase)
+  var ERR_TEXT = { "40001": "Otra persona cambió este mercado mientras lo mirabas. Se ha recargado.", "42501": "No tienes acceso a esta acción." };
+  function sbErr(e) {
+    var x = new Error((e && (ERR_TEXT[e.code] && e.code !== "55P03" ? ERR_TEXT[e.code] : e.message)) || "Error de conexión");
+    x.code = e && e.code; return x;
+  }
+  function columnOf(r) {
+    if (r.state === "discarded") return "rejected";
+    if (r.expired && (r.state === "pending" || r.state === "approved")) return "expired";
+    if (r.state === "pending") return r.engine_status === "rejected" ? "rejected" : "review";
+    return r.state;
+  }
+  function toView(row) {
+    var v = row;
+    v.column = columnOf(row);
+    v.claim = row.claim_by ? { by: row.claim_by_name, until: row.claim_until } : null;
+    v.claimed_by_me = !!(row.claim_by && S.me && row.claim_by === S.me.user_id);
+    v.approved_by = row.approved_by_name;
+    v.exports = (row.exports || []).map(function (x) { return { version: x.version, by: x.by, at: x.at, file: x.idempotency_key, destination: x.destination }; });
+    v.history = (row.history || []).slice().reverse();
+    v.unexported_changes = row.state === "pending" && v.exports.length > 0;
+    v.proposers = [row.origin === "engine" ? "el motor" : "el motor, a partir de una petición"];
+    v.created_by = v.proposers[0];
+    return v;
+  }
+  function load() {
+    var q1 = SB.from("market_board").select("*");
+    var q2 = SB.from("requests").select("*").order("created_at", { ascending: false }).limit(200);
+    return Promise.all([q1, q2]).then(function (res) {
+      if (res[0].error) throw sbErr(res[0].error);
+      if (res[1].error) throw sbErr(res[1].error);
+      S.records = res[0].data.map(toView); S.requests = res[1].data; S.lastSync = new Date();
+      if (S.open) { var cur = find(S.open.market_key); if (cur && !S.editing) S.open = cur; }
+      renderAll();
+    });
+  }
+  function find(key) { for (var i = 0; i < S.records.length; i++) if (S.records[i].market_key === key) return S.records[i]; return null; }
+  function replace(view) {
+    for (var i = 0; i < S.records.length; i++) if (S.records[i].market_key === view.market_key) S.records[i] = view;
+    if (S.open && S.open.market_key === view.market_key) S.open = view;
+  }
+  function doAction(action, payload, okMsg) {
+    if (!S.open || S.busy) return Promise.resolve();
+    S.busy = true; renderActions();
+    var key = S.open.market_key;
+    return SB.rpc("market_act", { p_key: key, p_action: action, p_expected_version: S.open.version, p_payload: payload || {} })
+      .then(function (res) {
+        if (res.error) throw sbErr(res.error);
+        var view = toView(res.data); replace(view); if (okMsg) toast(okMsg); return view;
+      })
+      .catch(function (e) {
+        toast(e.message, true);
+        if (e.code === "40001" || e.code === "55P03") load().catch(function () {});
+        throw e;
+      })
+      .finally(function () { S.busy = false; renderAll(); if (S.open) renderDrawer(); });
+  }
+  function envelope(key, version, destination) {
+    return SB.from("exports").select("envelope").eq("market_key", key).eq("export_version", version).eq("destination", destination || "default").single()
+      .then(function (res) { if (res.error) throw sbErr(res.error); return res.data.envelope; });
+  }
+  function download(env) {
+    var name = env.market_key + ".v" + env.export_version + ".json";
+    var blob = new Blob([JSON.stringify(env, null, 2) + "\n"], { type: "application/json" });
+    var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    return name;
+  }
+  function deadlineHTML(r) {
+    if (!r.export_deadline || r.state === "exported" || r.state === "discarded") return "";
+    var ms = Date.parse(r.export_deadline) - Date.now();
+    if (ms <= 0) return '<span class="deadline urgent">Plazo de exportación vencido</span>';
+    var h = ms / 36e5, cls = h < 6 ? "urgent" : h < 48 ? "soon" : "";
+    var left = h < 1 ? Math.round(ms / 6e4) + " min" : h < 48 ? Math.round(h) + " h" : Math.round(h / 24) + " d";
+    return '<span class="deadline ' + cls + '">Exportable hasta ' + esc(fmtDate(toTz(r.export_deadline, r.market.timing.timezone))) + ' (' + left + ')</span>';
+  }
+  function toTz(iso, tz) {
+    var d = new Date(Date.parse(iso)), m = /([+-])(\d{2}):(\d{2})/.exec(tz || "+00:00");
+    var off = m ? (m[1] === "-" ? -1 : 1) * (parseInt(m[2], 10) * 60 + parseInt(m[3], 10)) : 0;
+    var l = new Date(d.getTime() + off * 60000);
+    var pad = function (n) { return String(n).padStart(2, "0"); };
+    return l.getUTCFullYear() + "-" + pad(l.getUTCMonth() + 1) + "-" + pad(l.getUTCDate()) + "T" + pad(l.getUTCHours()) + ":" + pad(l.getUTCMinutes()) + ":00" + (tz || "+00:00");
+  }
+
+  // ---------------------------------------------------------------- tarjetas
+  var CLOCK = '<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 4.5V8l2.5 1.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+  function cardHTML(m) {
+    var t = m.timing, closeLine;
+    closeLine = t.close_at
+      ? '<div class="closes">' + CLOCK + '<span>Cierra ' + esc(fmtDate(t.close_at)) + ' <span class="num">(' + esc(relative(t.close_at)) + ')</span></span></div>'
+      : '<div class="closes pending">' + CLOCK + '<span>Cierre por fijar</span></div>';
+    var body;
+    if (m.type === "binary") {
+      body = '<div class="bin">' + m.outcomes.map(function (o) {
+        return '<button type="button" class="' + (o.id === "no" ? "no" : "yes") + '" tabindex="-1">' + esc(o.label) + ' <span class="price">' + cents(o.initial_price) + '</span></button>';
+      }).join("") + '</div>';
+    } else {
+      body = '<div class="cats">' + m.outcomes.slice(0, 4).map(function (o) {
+        return '<div class="row"><span class="lbl" title="' + esc(o.label) + '">' + esc(o.label) + '</span><span class="pct">' + pct(o.initial_price) + '</span><button type="button" tabindex="-1">Elegir</button></div>';
+      }).join("") + (m.outcomes.length > 4 ? '<div class="more">y ' + (m.outcomes.length - 4) + ' opciones más</div>' : "") + '</div>';
+    }
+    var banner = m.rejection ? '<div class="reject-banner">Rechazado: ' + esc(m.rejection.reasons.map(function (r) { return r.message; }).join(" ")) + '</div>' : "";
+    return '<article class="card" aria-label="Vista previa del mercado">' + banner +
+      '<div class="card-head"><span class="cat">' + esc(catLabel(m.category)) + '</span><span>' + esc(m.country) + '</span></div>' +
+      '<h3>' + esc(m.title) + '</h3>' + closeLine + body +
+      '<div class="card-foot"><span>Se resuelve con ' + esc(m.resolution.primary_source.name) + '</span><span>' + (m.type === "binary" ? "Sí / No" : m.outcomes.length + " opciones") + '</span></div></article>';
+  }
+  function stateFlags(r) {
+    var m = r.market, f = [];
+    if (r.state === "discarded") f.push('<span class="flag bad">Descartado</span>');
+    else if (m.status === "rejected" && r.state === "pending") f.push('<span class="flag bad">Rechazado por el motor</span>');
+    if (r.state === "approved") f.push('<span class="flag good">Aprobado por ' + esc(r.approved_by) + '</span>');
+    if (r.expired && r.state !== "exported" && r.state !== "discarded") f.push('<span class="flag bad">Vencido</span>');
+    if (r.exports.length) f.push('<span class="flag good">Exportado v' + r.exports[r.exports.length - 1].version + '</span>');
+    if (r.unexported_changes) f.push('<span class="flag warn">Cambios sin exportar</span>');
+    if (m.status === "needs_close_date") f.push('<span class="flag warn">Cierre por fijar</span>');
+    if (r.edited) f.push('<span class="flag ok">Editado</span>');
+    if (r.engine_incoming) f.push('<span class="flag warn">Versión nueva del motor</span>');
+    if (m.flags.political) f.push('<span class="flag warn">Político</span>');
+    if (m.flags.single_source) f.push('<span class="flag warn">Una fuente</span>');
+    if (r.claim) f.push('<span class="flag ' + (r.claimed_by_me ? "ok" : "warn") + '">' + (r.claimed_by_me ? "Lo estás revisando" : "Lo revisa " + esc(r.claim.by)) + '</span>');
+    return f.join("");
+  }
+  function fichaHTML(r) {
+    var m = r.market;
+    var who = (r.origin === "engine" ? "Propuesto por el motor" : "Creado por el motor a partir de una petición") + " · " + esc(countryName(r.country));
+    return '<div class="ficha">' +
+      '<div class="ficha-row"><span class="score"><span>Prioridad</span><span class="meter"><i style="width:' + m.priority.score + '%"></i></span><b class="num">' + m.priority.score + '</b></span>' +
+      '<button class="link-btn" data-open="' + esc(r.market_key) + '">Abrir</button></div>' +
+      '<div class="flags">' + stateFlags(r) + '<span class="flag">' + esc(m.mold.id) + '</span></div>' +
+      deadlineHTML(r) + '<div class="who">' + who + '</div></div>';
+  }
+
+  // ---------------------------------------------------------------- listas
+  function lastActivity(r) { var h = r.history; return h.length ? h[h.length - 1].at : r.created_at; }
+  function visible() {
+    var q = S.q.trim().toLowerCase();
+    var list = S.records.filter(function (r) {
+      var m = r.market;
+      if (r.column !== S.col) return false;
+      if (S.filter === "needs" && m.status !== "needs_close_date") return false;
+      if (S.filter === "edited" && !r.edited) return false;
+      if (S.filter === "incoming" && !r.engine_incoming) return false;
+      if (S.filter === "single" && !m.flags.single_source) return false;
+      if (S.cat && m.category !== S.cat) return false;
+      if (S.country && r.country !== S.country) return false;
+      if (q) {
+        var hay = (m.title + " " + m.summary + " " + r.market_key + " " + m.outcomes.map(function (o) { return o.label; }).join(" ")).toLowerCase();
+        if (hay.indexOf(q) === -1) return false;
+      }
+      return true;
+    });
+    list.sort(function (a, b) {
+      if (S.sort === "deadline") { var da = a.export_deadline || "9999", db = b.export_deadline || "9999"; if (da !== db) return da < db ? -1 : 1; return b.market.priority.score - a.market.priority.score; }
+      if (S.sort === "close") { var ca = a.market.timing.close_at || "9999", cb = b.market.timing.close_at || "9999"; return ca < cb ? -1 : ca > cb ? 1 : 0; }
+      if (S.sort === "recent") { var la = lastActivity(a), lb = lastActivity(b); return la < lb ? 1 : la > lb ? -1 : 0; }
+      return b.market.priority.score - a.market.priority.score;
+    });
+    return list;
+  }
+  function renderRequests() {
+    var mine = S.me ? S.me.user_id : null;
+    var list = S.requests.filter(function (q) { return !S.country || q.country === S.country; });
+    if (!list.length) return '<div class="empty">Nadie ha pedido nada todavía. Usa <b>Pedir mercado</b> para pedir uno.</div>';
+    return list.map(function (q) {
+      var st = REQ_STATUS[q.status] || [q.status, ""];
+      var links = (q.result_keys || []).map(function (k) { return find(k) ? '<button class="link-btn" data-open="' + esc(k) + '">' + esc(find(k).market.title) + '</button>' : '<span class="code">' + esc(k) + '</span>'; }).join("<br>");
+      return '<article class="req"><div class="flags"><span class="flag ' + st[1] + '">' + st[0] + '</span><span class="flag">' + esc(countryName(q.country)) + '</span>' +
+        (q.kind === "open" ? '<span class="flag">Búsqueda abierta</span>' : "") + (q.requested_by === mine ? '<span class="flag ok">Tuya</span>' : "") + '</div>' +
+        '<p>' + esc(q.text) + '</p>' + (q.url ? '<a class="code" href="' + esc(q.url) + '" target="_blank" rel="noopener">' + esc(q.url) + '</a>' : "") +
+        (q.reason ? '<p class="meta">' + esc(q.reason) + '</p>' : "") + (links ? '<div>' + links + '</div>' : "") +
+        '<div class="meta">Pedido ' + esc(fmtUTC(q.created_at)) + (q.updated_at !== q.created_at ? ' · actualizado ' + esc(fmtUTC(q.updated_at)) : "") + '</div></article>';
+    }).join("");
+  }
+  function renderGrid() {
+    var grid = $("grid");
+    $("errors-section").hidden = true;
+    document.querySelector(".toolbar:not([style])").hidden = S.col === "requests";
+    if (S.col === "requests") { grid.innerHTML = renderRequests(); return; }
+    var list = visible();
+    if (!S.records.length) {
+      grid.innerHTML = '<div class="empty">Todavía no hay mercados. El motor los irá trayendo en sus corridas, o puedes pedir uno con <b>Pedir mercado</b>.</div>';
+    } else if (!list.length) {
+      grid.innerHTML = '<div class="empty">' + (S.filter !== "all" || S.q || S.cat ? "Ningún mercado coincide con estos filtros." : "Nada en " + COLS[S.col].label.toLowerCase() + " por ahora.") + '</div>';
+    } else {
+      grid.innerHTML = list.map(function (r) { return '<div class="item">' + cardHTML(r.market) + fichaHTML(r) + '</div>'; }).join("");
+    }
+    var showErr = S.col === "rejected" && S.errors.length;
+    $("errors-section").hidden = !showErr;
+    if (showErr) {
+      $("err-grid").innerHTML = S.errors.map(function (r) {
+        return '<article class="rej"><h3>' + esc(r.draft) + '</h3><div class="meta">' + (r.code === "duplicate" ? "Duplicado" : "Error") +
+          ' · molde ' + esc(r.mold_id || "—") + ', país ' + esc(r.country || "—") + '</div><ul>' +
+          (r.reasons || []).filter(Boolean).map(function (x) { return '<li>' + esc(x) + '</li>'; }).join("") + '</ul></article>';
+      }).join("");
+    }
+  }
+  function renderHeader() {
+    var count = { review: 0, rejected: 0, approved: 0, exported: 0, expired: 0, requests: 0 };
+    S.records.forEach(function (r) { if (!S.country || r.country === S.country) count[r.column]++; });
+    count.requests = S.requests.filter(function (q) { return (q.status === "queued" || q.status === "working") && (!S.country || q.country === S.country); }).length;
+    Array.prototype.forEach.call(document.querySelectorAll("[data-count]"), function (el) {
+      var c = el.dataset.count; el.textContent = count[c] + (c === "rejected" && S.errors.length ? " + " + S.errors.length : "");
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("#tabs .tab"), function (b) { b.setAttribute("aria-selected", b.dataset.col === S.col ? "true" : "false"); });
+    $("tab-note").textContent = COLS[S.col].note;
+    var inC = function (r) { return !S.country || r.country === S.country; };
+    var soon = S.records.filter(function (r) { return inC(r) && (r.column === "review" || r.column === "approved") && r.export_deadline && Date.parse(r.export_deadline) - Date.now() < 48 * 36e5; }).length;
+    var needs = S.records.filter(function (r) { return inC(r) && r.column === "review" && r.market.status === "needs_close_date"; }).length;
+    var stats = [[count.review, "por revisar"], [soon, "vencen en 48 h"], [needs, "cierre por fijar"], [count.approved, "por exportar"], [count.exported, "exportados"]];
+    $("stats").innerHTML = stats.map(function (s) { return '<div class="stat"><b>' + s[0] + '</b><span>' + s[1] + '</span></div>'; }).join("");
+    var cs = Array.from(new Set(S.records.map(function (r) { return r.country; }).concat(S.requests.map(function (q) { return q.country; })))).sort();
+    var csel = $("country");
+    csel.innerHTML = '<option value="">Todos los países</option>' + cs.map(function (c) { return '<option value="' + esc(c) + '">' + esc(countryName(c)) + '</option>'; }).join("");
+    csel.value = S.country;
+    $("subtitle").textContent = S.records.length ? S.records.filter(inC).length + " mercados" + (S.country ? " de " + countryName(S.country) : " en " + cs.length + (cs.length === 1 ? " país" : " países")) + "." : "Sin mercados todavía.";
+    var mode = $("mode");
+    if (S.interactive) {
+      mode.className = "mode";
+      mode.innerHTML = '<span><span class="dot"></span>Conectado como <b>' + esc(S.user) + '</b></span>' +
+        '<span>Exportar descarga el JSON</span>' +
+        '<span class="num">Actualizado ' + (S.lastSync ? S.lastSync.toLocaleTimeString("es") : "—") + '</span>' +
+        '<button class="link-btn" id="logout">Salir</button>';
+    } else {
+      mode.className = "mode readonly";
+      mode.innerHTML = '<span><span class="dot"></span><b>Vista de solo lectura</b></span><span>Para editar, aprobar y exportar, abre el panel con <code>python3 scripts/motor.py serve --user tu_nombre</code>.</span>';
+    }
+    var cats = Array.from(new Set(S.records.map(function (r) { return r.market.category; }))).sort();
+    var sel = $("cat"), prev = S.cat;
+    sel.innerHTML = '<option value="">Todas las categorías</option>' + cats.map(function (c) { return '<option value="' + esc(c) + '">' + esc(catLabel(c)) + '</option>'; }).join("");
+    sel.value = prev; $("sort").value = S.sort;
+    $("foot").textContent = "Precios iniciales equitativos (1/N); el pricing real lo fija otra instancia. Un mercado se puede exportar hasta su cierre menos el margen (12 h por defecto).";
+  }
+  function renderAll() { renderHeader(); renderGrid(); if (S.open && !$("drawer").hidden) renderDrawer(); }
+
+  // ---------------------------------------------------------------- detalle
+  function list(items) { return items && items.length ? "<ul>" + items.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + "</ul>" : "<p>—</p>"; }
+  var SECTIONS = {
+    rules: ["Reglas", function (r) {
+      var m = r.market;
+      var rej = m.rejection ? '<div class="reject-banner">' + m.rejection.reasons.map(function (x) { return esc(x.message) + ' <span class="code">(' + esc(x.code) + ')</span>'; }).join("<br>") + '</div>' : "";
+      return rej + '<div><h4>Resumen</h4><p>' + esc(m.summary) + '</p></div>' +
+        '<div><h4>Cómo se gana</h4>' + list(m.rules.outcome_rules.map(function (x) { return x.rule; })) + '</div>' +
+        '<div><h4>No cuenta</h4>' + list(m.rules.does_not_count) + '</div>' +
+        '<div><h4>Casos límite</h4>' + list(m.rules.edge_cases) + '</div>' +
+        '<div><h4>Anulación</h4>' + list(m.rules.void_rules) + '</div>' +
+        '<div><h4>Cierre anticipado</h4><p>' + esc(m.rules.early_close) + '</p></div>' +
+        (m.glossary && m.glossary.length ? '<div><h4>Glosario</h4>' + list(m.glossary.map(function (g) { return g.term + ": " + g.meaning; })) + '</div>' : "");
+    }],
+    resolution: ["Resolución", function (r) {
+      var m = r.market, t = m.timing, res = m.resolution;
+      return '<dl class="kv">' +
+        '<dt>Inicio del evento</dt><dd>' + esc(fmtDate(t.event_start_at, !t.event_time_known)) + (t.event_time_known ? "" : " (hora por confirmar)") + '</dd>' +
+        '<dt>Cierre</dt><dd>' + (t.close_at ? esc(fmtDate(t.close_at)) : "<b>Por fijar</b>") + '</dd>' +
+        '<dt>Regla de cierre</dt><dd>' + esc(t.close_explanation) + '</dd>' +
+        '<dt>Resolución esperada</dt><dd>' + esc(res.expected_resolution_by ? fmtDate(res.expected_resolution_by) : "—") + '</dd>' +
+        '<dt>Zona horaria</dt><dd>UTC' + esc(t.timezone) + '</dd>' +
+        '<dt>Fuente principal</dt><dd><a href="' + esc(res.primary_source.url) + '" target="_blank" rel="noopener">' + esc(res.primary_source.name) + '</a></dd>' +
+        '<dt>Respaldo</dt><dd>' + res.backup_sources.map(function (s) { return '<a href="' + esc(s.url) + '" target="_blank" rel="noopener">' + esc(s.name) + '</a>'; }).join(", ") + '</dd>' +
+        '</dl><div><h4>Instrucciones para quien resuelve</h4>' + list(res.resolver_instructions) + '</div>';
+    }],
+    context: ["Contexto", function (r) {
+      var m = r.market;
+      return '<div><h4>Hechos (' + m.context.corroborating_sources + ' fuentes distintas)</h4><ul>' + m.context.facts.map(function (f) {
+        return '<li class="fact">' + esc(f.text) + ' <a href="' + esc(f.url) + '" target="_blank" rel="noopener">fuente</a> <span class="when">publicado ' + esc(f.published_at || "sin fecha") + '</span></li>';
+      }).join("") + '</ul></div><div><h4>Cobertura en otras plataformas</h4><p>' + esc((m.existing_coverage && m.existing_coverage.note) || "No verificado.") + '</p></div>';
+    }],
+    priority: ["Prioridad", function (r) {
+      var m = r.market, s = m.priority.signals;
+      return '<dl class="kv"><dt>Puntuación</dt><dd class="num"><b>' + m.priority.score + '</b> / 100</dd>' +
+        '<dt>Cobertura</dt><dd>' + s.coverage_count + ' fuentes esta semana</dd>' +
+        '<dt>Incertidumbre</dt><dd>' + ({ high: "Alta", medium: "Media", low: "Baja" }[s.uncertainty] || s.uncertainty) + '</dd>' +
+        '<dt>Dos bandos</dt><dd>' + (s.two_sides ? "Sí" : "No") + '</dd><dt>Diáspora</dt><dd>' + (s.diaspora_interest ? "Sí" : "No") + '</dd>' +
+        (m.flags.political ? '<dt>Político</dt><dd>' + esc(m.flags.political_reason) + '</dd>' : "") +
+        '</dl><div><h4>Cálculo</h4>' + list(m.priority.reasons) + '</div>';
+    }],
+    history: ["Historial", function (r) {
+      var items = r.history.slice().reverse().map(function (h) {
+        return '<li><time>' + esc(fmtUTC(h.at)) + '</time><span><b>' + esc(h.by) + '</b>: ' + esc(ACTION_LABELS[h.action] || h.action) + (h.detail && h.detail !== ACTION_LABELS[h.action] ? ' · ' + esc(h.detail) : "") + '</span></li>';
+      }).join("");
+      var exp = r.exports.length ? '<div><h4>Exportaciones</h4><ul>' + r.exports.slice().reverse().map(function (x) {
+        return '<li>v' + x.version + ' · ' + esc(fmtUTC(x.at)) + ' · ' + esc(x.by) + ' · <span class="code">' + esc(x.file) + '</span>' + (x.posted ? ' · plataforma ' + esc(x.posted.status) : "") + '</li>';
+      }).join("") + '</ul></div>' : "";
+      return '<div><h4>Identidad</h4><dl class="kv"><dt>market_key</dt><dd class="code">' + esc(r.market_key) + '</dd><dt>market_id</dt><dd class="code">' + esc(r.market.market_id) + '</dd>' +
+        '<dt>Origen</dt><dd>' + esc(r.created_by) + '</dd><dt>Plazo de exportación</dt><dd>' + (r.export_deadline ? esc(fmtDate(toTz(r.export_deadline, r.market.timing.timezone))) + ' (cierre − ' + Math.round(r.export_margin_minutes / 60) + ' h)' : "—") + '</dd></dl></div>' + exp +
+        '<div><h4>Actividad</h4><ul class="hist">' + items + '</ul></div>';
+    }],
+    json: ["JSON", function (r) {
+      var opts = '<option value="current">Mercado actual</option>' + r.exports.slice().reverse().map(function (x) { return '<option value="' + x.version + '|' + esc(x.destination) + '">Exportado v' + x.version + ' (sobre completo)</option>'; }).join("");
+      return '<div class="json-bar"><select class="select" id="json-which" aria-label="Qué JSON ver"' + (S.interactive ? "" : " disabled") + '>' + opts + '</select><button class="btn primary" id="copy">Copiar JSON</button></div>' +
+        '<pre class="json" id="json-pre">' + esc(JSON.stringify(r.market, null, 2)) + '</pre>';
+    }]
+  };
+
+  function renderNotices() {
+    var r = S.open, n = [];
+    if (r.claim && !r.claimed_by_me) n.push('<div class="notice warn"><span><b>' + esc(r.claim.by) + '</b> lo está revisando hasta las ' + esc(fmtUTC(r.claim.until).slice(-5)) + '. No puedes cambiarlo mientras tanto.</span></div>');
+    if (r.engine_incoming) {
+      n.push('<div class="notice warn"><span>El motor generó una versión nueva de este mercado' + (r.edited ? '. Tus ediciones se mantienen al aceptarla.' : '.') + '</span>' +
+        (S.interactive ? '<span><button class="btn" data-act="accept_engine">Aceptar versión nueva</button> <button class="btn" data-act="ignore_engine">Ignorar</button></span>' : "") + '</div>');
+    }
+    if (r.market.status === "needs_close_date" && r.state === "pending") n.push('<div class="notice info"><span>Falta la fecha de cierre. ' + esc(r.market.timing.close_explanation) + '</span></div>');
+    if (r.unexported_changes) n.push('<div class="notice info"><span>Tiene cambios desde la última exportación (v' + r.exports[r.exports.length - 1].version + '). Al exportarlo se enviará como actualización.</span></div>');
+    $("d-notices").innerHTML = n.join("");
+  }
+  function renderActions() {
+    var el = $("d-actions"), r = S.open;
+    if (!S.interactive) { el.innerHTML = '<span class="hint">Vista de solo lectura: abre el panel con <span class="code">motor.py serve</span> para revisar.</span>'; return; }
+    var blocked = r.claim && !r.claimed_by_me, dis = (blocked || S.busy) ? " disabled" : "", b = [];
+    if (S.editing) { el.innerHTML = '<span class="hint">Editando. Guarda o cancela abajo.</span>'; return; }
+    if (r.state === "pending") {
+      var needs = r.market.status === "needs_close_date";
+      b.push('<button class="btn primary" data-act="approve"' + (needs || r.expired ? " disabled" : dis) + '>Aprobar</button>');
+      b.push('<button class="btn" data-act="edit"' + dis + '>Editar</button>');
+      b.push('<button class="btn danger" data-act="discard"' + dis + '>Descartar</button>');
+      if (r.expired) b.push('<span class="hint">Ya pasó el plazo para publicarlo. Si el cierre real es más tarde, edítalo.</span>');
+      else if (needs) b.push('<span class="hint">Edita el mercado para fijar el cierre y poder aprobarlo.</span>');
+      else if (r.market.status === "rejected") b.push('<span class="hint">Aprobarlo anula el rechazo del motor y queda registrado.</span>');
+    } else if (r.state === "approved") {
+      b.push('<button class="btn primary" data-act="export"' + (r.expired ? " disabled" : dis) + '>' + (r.exports.length ? "Exportar v" + (r.exports[r.exports.length - 1].version + 1) : "Exportar") + '</button>');
+      b.push('<button class="btn" data-act="unapprove"' + dis + '>Devolver a revisión</button>');
+      b.push('<button class="btn" data-act="edit"' + dis + '>Editar</button>');
+      if (r.expired) b.push('<span class="hint">Ya pasó el plazo para publicarlo.</span>');
+    } else if (r.state === "exported") {
+      b.push('<button class="btn" data-act="edit"' + dis + '>Editar (crea una versión nueva)</button>');
+      b.push('<button class="btn" data-act="download">Descargar JSON</button>');
+      b.push('<span class="hint">Exportado v' + r.exports[r.exports.length - 1].version + ' por ' + esc(r.exports[r.exports.length - 1].by) + '.</span>');
+    } else if (r.state === "discarded") {
+      b.push('<button class="btn" data-act="restore"' + (S.busy ? " disabled" : "") + '>Restaurar</button>');
+    }
+    if (r.claimed_by_me) b.push('<button class="btn" data-act="release">Dejar de revisar</button>');
+    el.innerHTML = b.join("");
+  }
+  function renderTabs() {
+    var keys = S.editing ? ["edit"] : Object.keys(SECTIONS);
+    $("d-tabs").innerHTML = keys.map(function (k) {
+      var label = k === "edit" ? "Editar" : SECTIONS[k][0];
+      return '<button class="tab" role="tab" data-t="' + k + '" aria-selected="' + (k === S.section || (S.editing && k === "edit") ? "true" : "false") + '">' + label + '</button>';
+    }).join("");
+  }
+  function renderBody() {
+    var body = $("d-body");
+    if (S.editing) { body.innerHTML = editForm(S.open); bindForm(); return; }
+    body.innerHTML = SECTIONS[S.section][1](S.open);
+    if (S.section === "json") bindJson();
+  }
+  function renderDrawer() {
+    var r = S.open;
+    $("d-title").textContent = r.market.title;
+    $("d-id").textContent = r.market_key;
+    renderNotices(); renderActions(); renderTabs(); renderBody();
+  }
+  function openDetail(key) {
+    S.open = find(key); if (!S.open) return;
+    S.section = "rules"; S.editing = false; lastFocus = document.activeElement;
+    $("drawer").hidden = false; $("scrim").hidden = false; renderDrawer(); $("d-close").focus();
+  }
+  var lastFocus = null;
+  function closeDetail() {
+    if (S.editing && !confirmLeave()) return;
+    if (S.interactive && S.open && S.open.claimed_by_me) { doAction("release").catch(function () {}); }
+    S.editing = false; S.open = null; $("drawer").hidden = true; $("scrim").hidden = true;
+    if (lastFocus) lastFocus.focus();
+  }
+  function confirmLeave() { return !formDirty() || leaveArmed(); }
+  var leaveTs = 0;
+  function leaveArmed() {
+    if (Date.now() - leaveTs < 4000) return true;
+    leaveTs = Date.now(); toast("Tienes cambios sin guardar. Vuelve a cerrar para descartarlos."); return false;
+  }
+
+  // ---------------------------------------------------------------- edición
+  function toLocalInput(iso, off) {
+    if (!iso) return "";
+    var p = parts(iso, off);
+    return p.y + "-" + String(p.m).padStart(2, "0") + "-" + String(p.date).padStart(2, "0") + "T" + String(p.h).padStart(2, "0") + ":" + String(p.mi).padStart(2, "0");
+  }
+  function lines(arr) { return (arr || []).join("\n"); }
+  var TITLE_MAX = 90;
+  function editForm(r) {
+    var m = r.market, off = offsetMinutes(m.timing.event_start_at), tz = m.timing.timezone;
+    var f = '<div class="form" id="edit-form">';
+    f += field("title", "Título", '<input id="f-title" maxlength="140" value="' + esc(m.title) + '"><div class="counter" id="title-count"></div>', "Pregunta que verá el usuario.");
+    f += field("summary", "Resumen", '<textarea id="f-summary">' + esc(m.summary) + '</textarea>');
+    f += field("close_at", "Cierre del trading (UTC" + esc(tz) + ")", '<input id="f-close" type="datetime-local" value="' + toLocalInput(m.timing.close_at, off) + '">',
+      "Debe ser anterior a que se conozca el resultado. " + esc(m.timing.close_explanation));
+    m.outcomes.forEach(function (o) {
+      var rule = (m.rules.outcome_rules.filter(function (x) { return x.outcome_id === o.id; })[0] || {}).rule || "";
+      f += field("outcome_" + o.id, "Opción: " + o.label, '<input data-ol="' + esc(o.id) + '" value="' + esc(o.label) + '"><textarea data-or="' + esc(o.id) + '">' + esc(rule) + '</textarea>', "Nombre visible y regla de esta opción.");
+    });
+    f += field("does_not_count", "No cuenta (una por línea)", '<textarea id="f-dnc">' + esc(lines(m.rules.does_not_count)) + '</textarea>');
+    f += field("edge_cases", "Casos límite (uno por línea)", '<textarea id="f-edge">' + esc(lines(m.rules.edge_cases)) + '</textarea>');
+    f += field("void_rules", "Anulación (una por línea)", '<textarea id="f-void">' + esc(lines(m.rules.void_rules)) + '</textarea>');
+    f += field("early_close", "Cierre anticipado", '<textarea id="f-early">' + esc(m.rules.early_close) + '</textarea>');
+    f += field("resolver_instructions", "Instrucciones para quien resuelve (una por línea)", '<textarea id="f-resolver">' + esc(lines(m.resolution.resolver_instructions)) + '</textarea>');
+    f += '<div class="form-actions"><button class="btn primary" id="f-save">Guardar cambios</button><button class="btn" id="f-cancel">Cancelar</button>' +
+      (r.edited ? '<button class="btn danger" id="f-reset">Volver a lo que generó el motor</button>' : "") + '</div></div>';
+    return f;
+  }
+  function field(key, label, control, sub) {
+    var changed = S.open.overrides && (key in S.open.overrides || (key.indexOf("outcome_") === 0 && (S.open.overrides.outcome_labels || S.open.overrides.outcome_rules)));
+    return '<div class="field' + (changed ? " changed" : "") + '"><label>' + label + '</label>' + control + (sub ? '<div class="sub">' + sub + '</div>' : "") + '</div>';
+  }
+  var formSnapshot = null;
+  function readForm() {
+    var m = S.open.market, off = m.timing.timezone, ov = {};
+    ov.title = $("f-title").value; ov.summary = $("f-summary").value;
+    var c = $("f-close").value; if (c) ov.close_at = c + ":00" + off;
+    ov.outcome_labels = {}; ov.outcome_rules = {};
+    Array.prototype.forEach.call(document.querySelectorAll("[data-ol]"), function (el) { ov.outcome_labels[el.dataset.ol] = el.value; });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-or]"), function (el) { ov.outcome_rules[el.dataset.or] = el.value; });
+    var split = function (id) { return $(id).value.split("\n").map(function (x) { return x.trim(); }).filter(Boolean); };
+    ov.does_not_count = split("f-dnc"); ov.edge_cases = split("f-edge"); ov.void_rules = split("f-void");
+    ov.early_close = $("f-early").value; ov.resolver_instructions = split("f-resolver");
+    return ov;
+  }
+  function formDirty() { return S.editing && $("edit-form") && JSON.stringify(readForm()) !== formSnapshot; }
+  function bindForm() {
+    formSnapshot = JSON.stringify(readForm());
+    var count = function () { var n = $("f-title").value.length, c = $("title-count"); c.textContent = n + " / " + TITLE_MAX; c.className = "counter" + (n > TITLE_MAX ? " over" : ""); };
+    $("f-title").addEventListener("input", count); count();
+    $("f-cancel").addEventListener("click", function () { S.editing = false; renderDrawer(); });
+    $("f-save").addEventListener("click", function () {
+      var ov = readForm();
+      if (!ov.close_at && S.open.market.timing.close_at) { toast("La fecha de cierre no puede quedar vacía.", true); return; }
+      doAction("save", { overrides: ov }, "Cambios guardados").then(function () { S.editing = false; S.section = "rules"; renderDrawer(); }).catch(function () {});
+    });
+    if ($("f-reset")) $("f-reset").addEventListener("click", function () {
+      doAction("save", { reset: Object.keys(S.open.overrides) }, "Restaurado lo que generó el motor").then(function () { S.editing = false; renderDrawer(); }).catch(function () {});
+    });
+  }
+  function bindJson() {
+    var copy = $("copy"), pre = $("json-pre"), which = $("json-which");
+    copy.addEventListener("click", function () {
+      var done = function () { copy.textContent = "Copiado"; setTimeout(function () { copy.textContent = "Copiar JSON"; }, 1500); };
+      var fallback = function () { var rg = document.createRange(); rg.selectNodeContents(pre); var s = window.getSelection(); s.removeAllRanges(); s.addRange(rg); copy.textContent = "Seleccionado: copia con Ctrl+C"; };
+      try { navigator.clipboard.writeText(pre.textContent).then(done, fallback); } catch (e) { fallback(); }
+    });
+    which.addEventListener("change", function () {
+      if (which.value === "current") { pre.textContent = JSON.stringify(S.open.market, null, 2); return; }
+      pre.textContent = "Cargando…";
+      var pv = which.value.split("|");
+      envelope(S.open.market_key, parseInt(pv[0], 10), pv[1])
+        .then(function (d) { pre.textContent = JSON.stringify(d, null, 2); })
+        .catch(function (e) { pre.textContent = e.message; });
+    });
+  }
+
+  // ---------------------------------------------------------------- eventos
+  document.addEventListener("click", function (e) {
+    var o = e.target.closest("[data-open]"); if (o) { openDetail(o.dataset.open); return; }
+    var a = e.target.closest("[data-act]"); if (!a || a.disabled) return;
+    var act = a.dataset.act;
+    if (act === "edit") {
+      var start = function () { S.editing = true; renderDrawer(); };
+      if (S.open.claimed_by_me) start(); else doAction("claim").then(start).catch(function () {});
+      return;
+    }
+    var msgs = { approve: "Aprobado", unapprove: "Devuelto a revisión", discard: "Descartado", restore: "Restaurado", export: "Exportado",
+      release: "Liberado para otros editores", accept_engine: "Versión nueva aceptada", ignore_engine: "Versión nueva ignorada" };
+    if (act === "download") {
+      var x = S.open.exports[S.open.exports.length - 1];
+      envelope(S.open.market_key, x.version, x.destination).then(function (env) { toast("Descargado " + download(env)); }).catch(function (e) { toast(e.message, true); });
+      return;
+    }
+    doAction(act, {}, msgs[act]).then(function (rec) {
+      if (act === "export" && rec) {
+        var x = rec.exports[rec.exports.length - 1];
+        envelope(rec.market_key, x.version, x.destination).then(function (env) { toast("Exportado v" + x.version + " · descargado " + download(env)); })
+          .catch(function (e) { toast("Exportado, pero no se pudo descargar: " + e.message, true); });
+      }
+    }).catch(function () {});
+  });
+  $("d-tabs").addEventListener("click", function (e) { var b = e.target.closest(".tab"); if (b && !S.editing) { S.section = b.dataset.t; renderTabs(); renderBody(); } });
+  $("d-close").addEventListener("click", closeDetail);
+  $("scrim").addEventListener("click", closeDetail);
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !$("drawer").hidden) closeDetail(); });
+  $("tabs").addEventListener("click", function (e) { var b = e.target.closest(".tab"); if (b) { S.col = b.dataset.col; renderAll(); } });
+  $("filters").addEventListener("click", function (e) {
+    var b = e.target.closest(".chip-btn"); if (!b) return;
+    S.filter = b.dataset.f;
+    Array.prototype.forEach.call(this.children, function (c) { c.setAttribute("aria-pressed", c === b ? "true" : "false"); });
+    renderGrid();
+  });
+  $("q").addEventListener("input", function () { S.q = this.value; renderGrid(); });
+  $("cat").addEventListener("change", function () { S.cat = this.value; renderGrid(); });
+  $("sort").addEventListener("change", function () { S.sort = this.value; savePrefs(); renderGrid(); });
+  $("country").addEventListener("change", function () { S.country = this.value; savePrefs(); renderAll(); });
+  document.addEventListener("click", function (e) { if (e.target.id === "logout") { SB.auth.signOut().then(function () { location.reload(); }); } });
+
+  // ---------------------------------------------------------------- pedir mercado
+  function openAsk() {
+    var cs = Array.from(new Set(S.records.map(function (r) { return r.country; }).concat(["VE"]))).sort();
+    $("a-country").innerHTML = cs.map(function (c) { return '<option value="' + esc(c) + '">' + esc(countryName(c)) + '</option>'; }).join("");
+    $("a-country").value = S.country || "VE";
+    $("a-text").value = ""; $("a-url").value = ""; $("a-kind").value = "specific"; $("a-match").innerHTML = "";
+    $("ask").hidden = false; $("m-scrim").hidden = false; $("a-text").focus();
+  }
+  function closeAsk() { $("ask").hidden = true; $("m-scrim").hidden = true; }
+  $("ask-btn").addEventListener("click", openAsk);
+  $("a-cancel").addEventListener("click", closeAsk);
+  $("m-scrim").addEventListener("click", closeAsk);
+  $("a-text").addEventListener("input", function () {
+    var words = this.value.toLowerCase().split(/[^a-záéíóúñü0-9]+/).filter(function (w) { return w.length > 3; });
+    if (words.length < 2) { $("a-match").innerHTML = ""; return; }
+    var hits = S.records.filter(function (r) {
+      var t = (r.market.title + " " + r.market_key.replace(/[._]/g, " ")).toLowerCase(), n = 0;
+      words.forEach(function (w) { if (t.indexOf(w) !== -1) n++; });
+      return n >= Math.min(2, words.length) && r.column !== "expired";
+    }).slice(0, 3);
+    $("a-match").innerHTML = hits.length ? '<div class="match">¿Es alguno de estos? Ya existe' + (hits.length > 1 ? "n" : "") + ':<br>' + hits.map(function (r) {
+      return '<button class="link-btn" data-open="' + esc(r.market_key) + '">' + esc(r.market.title) + '</button>';
+    }).join("<br>") + '</div>' : "";
+  });
+  $("a-match").addEventListener("click", function (e) { if (e.target.closest("[data-open]")) closeAsk(); });
+  $("a-send").addEventListener("click", function () {
+    var text = $("a-text").value.trim();
+    if (text.length < 3) { toast("Escribe qué quieres que busque el motor.", true); return; }
+    var btn = this; btn.disabled = true;
+    SB.rpc("request_market", { p_country: $("a-country").value, p_text: text, p_url: $("a-url").value.trim() || null, p_kind: $("a-kind").value })
+      .then(function (res) {
+        if (res.error) throw sbErr(res.error);
+        closeAsk(); toast("Petición enviada. El motor la atenderá en su próxima corrida."); return load();
+      })
+      .catch(function (e) { toast(e.message, true); })
+      .finally(function () { btn.disabled = false; });
+  });
+
+  // ---------------------------------------------------------------- arranque
+  function showLogin(msg) { $("app").hidden = true; $("login").hidden = false; $("l-err").textContent = msg || ""; }
+  function enter() {
+    return SB.rpc("me").then(function (res) {
+      if (res.error) throw sbErr(res.error);
+      if (!res.data) { SB.auth.signOut(); showLogin("Tu usuario no está dado de alta como revisor. Pídeselo al administrador."); return; }
+      S.me = res.data; S.user = res.data.name;
+      $("login").hidden = true; $("app").hidden = false;
+      return load().then(function () {
+        if (!enter.timer) enter.timer = setInterval(function () { if (!S.editing && !S.busy && document.visibilityState === "visible") load().catch(function () {}); }, 15000);
+      });
+    }).catch(function (e) { showLogin(e.message); });
+  }
+  $("login-form").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var btn = $("l-go"); btn.disabled = true; $("l-err").textContent = "";
+    SB.auth.signInWithPassword({ email: $("l-email").value.trim(), password: $("l-pass").value })
+      .then(function (res) { if (res.error) throw new Error(res.error.message === "Invalid login credentials" ? "Correo o contraseña incorrectos." : res.error.message); return enter(); })
+      .catch(function (err) { $("l-err").textContent = err.message; })
+      .finally(function () { btn.disabled = false; });
+  });
+  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible" && S.me && !S.editing) load().catch(function () {}); });
+  SB.auth.getSession().then(function (res) { if (res.data && res.data.session) enter(); else showLogin(); });
+})();
+</script>
+
+</html>
