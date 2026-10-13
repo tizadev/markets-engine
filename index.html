@@ -186,6 +186,14 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
 .modal h2 { margin: 0; font-size: var(--fs-lg); }
 .modal label { font-size: var(--fs-sm); font-weight: 600; display: flex; flex-direction: column; gap: 4px; }
 .modal textarea { min-height: 96px; resize: vertical; }
+.tenant-list { display: flex; flex-direction: column; gap: 6px; }
+.modal label.tenant { flex-direction: row; align-items: flex-start; gap: 8px; font-weight: 500; }
+.modal label.tenant input { width: auto; margin-top: 3px; }
+.tenant .why { display: block; color: var(--ink-2); font-weight: 400; font-size: var(--fs-xs); }
+.close-times { margin: 0; padding-left: 18px; font-size: var(--fs-sm); }
+.deliv { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.deliv li { font-size: var(--fs-sm); border-left: 3px solid var(--line); padding-left: 8px; }
+.deliv li.accepted { border-color: var(--yes); } .deliv li.rejected, .deliv li.failed { border-color: var(--no); } .deliv li.sending { border-color: var(--warn); }
 .match { font-size: var(--fs-sm); background: var(--warn-soft); border-radius: var(--radius-small); padding: 8px 10px; }
 
 @media (max-width: 480px) {
@@ -281,6 +289,13 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
   <div id="a-match"></div>
   <div class="form-actions" style="position:static"><button class="btn primary" id="a-send">Enviar petición</button><button class="btn" id="a-cancel">Cancelar</button></div>
 </div>
+<div class="modal" id="pub" role="dialog" aria-modal="true" aria-labelledby="pub-title" hidden>
+  <h2 id="pub-title">Publicar en Predice</h2>
+  <p class="hint" id="p-what"></p>
+  <div><h4>Operadores</h4><div class="tenant-list" id="p-tenants"></div></div>
+  <div id="p-close"></div>
+  <div class="form-actions" style="position:static"><button class="btn primary" id="p-send">Publicar</button><button class="btn" id="p-cancel">Cancelar</button></div>
+</div>
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
 <script id="motor-config" type="application/json">{"supabase_url": "https://kpchxnzvujunkaazqtpc.supabase.co", "supabase_key": "sb_publishable_sQ0iFFhvSuu8LgcKIx7Zbg_42CHrg9H"}</script>
@@ -291,7 +306,7 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
   var SB = window.supabase.createClient(CFG.supabase_url, CFG.supabase_key, { auth: { persistSession: true, autoRefreshToken: true } });
   var S = {
     interactive: true, me: null, user: null, store: "Supabase", exportEndpoint: false,
-    records: [], errors: [], requests: [],
+    records: [], errors: [], requests: [], tenants: null,
     col: "review", filter: "all", q: "", cat: "", country: "", sort: "deadline",
     open: null, section: "rules", editing: false, busy: false, lastSync: null
   };
@@ -301,8 +316,8 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
   var COLS = {
     review: { label: "Por revisar", note: "Mercados que el motor propone. Revísalos, edítalos si hace falta y apruébalos." },
     rejected: { label: "Rechazados", note: "Construidos completos pero excluidos por las reglas del país o por daño, o descartados por un editor. Puedes aprobarlos igualmente o restaurarlos." },
-    approved: { label: "Aprobados", note: "Listos para exportar a la plataforma." },
-    exported: { label: "Exportados", note: "Ya exportados. Si editas uno, vuelve a revisión y se exporta como versión nueva." },
+    approved: { label: "Aprobados", note: "Listos para publicar en Predice o exportar." },
+    exported: { label: "Exportados", note: "Publicados en Predice o exportados. Si editas uno, vuelve a revisión y se publica como versión nueva." },
     expired: { label: "Vencidos", note: "Ya no da tiempo a publicarlos: falta menos que el margen de exportación para su cierre." },
     requests: { label: "Peticiones", note: "Lo que el equipo ha pedido al motor y qué pasó con cada petición." }
   };
@@ -319,7 +334,10 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
     created: "Propuesto por el motor", also_proposed: "Otra persona generó el mismo mercado", claimed: "Empezó a revisarlo",
     released: "Dejó de revisarlo", edited: "Editó", approved: "Aprobó", unapproved: "Devolvió a revisión", discarded: "Descartó",
     restored: "Restauró", exported: "Exportó", export_skipped: "Exportación sin cambios", engine_updated: "El motor lo actualizó",
-    engine_incoming: "Versión nueva del motor", engine_accepted: "Aceptó la versión nueva del motor", engine_ignored: "Ignoró la versión nueva del motor"
+    engine_incoming: "Versión nueva del motor", engine_accepted: "Aceptó la versión nueva del motor", engine_ignored: "Ignoró la versión nueva del motor",
+    predice_sending: "Envió a Predice", predice_withdrawing: "Pidió retirarlo de Predice", predice_published: "Publicado en Predice",
+    predice_withdrawn: "Retirado de Predice", predice_rejected: "Predice lo rechazó", predice_failed: "Falló el envío a Predice",
+    predice_retry: "Reintentó el envío a Predice"
   };
   var COUNTRY_NAMES = { VE: "Venezuela", CO: "Colombia", AR: "Argentina", MX: "México", PE: "Perú", CL: "Chile", EC: "Ecuador", DO: "República Dominicana", PA: "Panamá", ES: "España", US: "Estados Unidos" };
   function countryName(cc) { return COUNTRY_NAMES[cc] || cc; }
@@ -393,7 +411,9 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
     v.approved_by = row.approved_by_name;
     v.exports = (row.exports || []).map(function (x) { return { version: x.version, by: x.by, at: x.at, file: x.idempotency_key, destination: x.destination }; });
     v.history = (row.history || []).slice().reverse();
-    v.unexported_changes = row.state === "pending" && v.exports.length > 0;
+    v.predice = row.predice || { published: false, tenant_ids: [], deliveries: [] };
+    v.lastDelivery = (v.predice.deliveries || [])[0] || null;
+    v.unexported_changes = row.state === "pending" && (v.exports.length > 0 || v.predice.published);
     v.proposers = [row.origin === "engine" ? "el motor" : "el motor, a partir de una petición"];
     v.created_by = v.proposers[0];
     return v;
@@ -449,12 +469,46 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
     var left = h < 1 ? Math.round(ms / 6e4) + " min" : h < 48 ? Math.round(h) + " h" : Math.round(h / 24) + " d";
     return '<span class="deadline ' + cls + '">Exportable hasta ' + esc(fmtDate(toTz(r.export_deadline, r.market.timing.timezone))) + ' (' + left + ')</span>';
   }
+  // Zonas horarias. Desde el motor 0.3 timing.timezone es un NOMBRE de zona
+  // (America/Caracas); los mercados viejos traen un desfase (-04:00). Las dos
+  // formas funcionan: el desfase de una zona se calcula en cada instante.
+  function zoneOffset(iso, tz) {
+    var m = /^([+-])(\d{2}):(\d{2})$/.exec(tz || "");
+    if (m) return (m[1] === "-" ? -1 : 1) * (parseInt(m[2], 10) * 60 + parseInt(m[3], 10));
+    if (!tz) return offsetMinutes(iso);
+    try {
+      var d = new Date(Date.parse(iso)), p = {};
+      new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" })
+        .formatToParts(d).forEach(function (x) { p[x.type] = x.value; });
+      return Math.round((Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour % 24, +p.minute, +p.second) - d.getTime()) / 60000);
+    } catch (e) { return offsetMinutes(iso); }
+  }
+  function offStr(min) {
+    var a = Math.abs(min);
+    return (min < 0 ? "-" : "+") + String(Math.floor(a / 60)).padStart(2, "0") + ":" + String(a % 60).padStart(2, "0");
+  }
+  function zoneLabel(tz) {
+    if (!tz || tz === "UTC") return "UTC";
+    if (/^[+-]\d{2}:\d{2}$/.test(tz)) return "UTC" + tz;
+    return "hora de " + tz.split("/").pop().replace(/_/g, " ");
+  }
   function toTz(iso, tz) {
-    var d = new Date(Date.parse(iso)), m = /([+-])(\d{2}):(\d{2})/.exec(tz || "+00:00");
-    var off = m ? (m[1] === "-" ? -1 : 1) * (parseInt(m[2], 10) * 60 + parseInt(m[3], 10)) : 0;
-    var l = new Date(d.getTime() + off * 60000);
+    var off = zoneOffset(iso, tz), l = new Date(Date.parse(iso) + off * 60000);
     var pad = function (n) { return String(n).padStart(2, "0"); };
-    return l.getUTCFullYear() + "-" + pad(l.getUTCMonth() + 1) + "-" + pad(l.getUTCDate()) + "T" + pad(l.getUTCHours()) + ":" + pad(l.getUTCMinutes()) + ":00" + (tz || "+00:00");
+    return l.getUTCFullYear() + "-" + pad(l.getUTCMonth() + 1) + "-" + pad(l.getUTCDate()) + "T" + pad(l.getUTCHours()) + ":" + pad(l.getUTCMinutes()) + ":00" + offStr(off);
+  }
+  // Hora de pared escrita en el formulario (AAAA-MM-DDTHH:MM) en la zona tz → ISO con su desfase.
+  function localToIso(local, tz) {
+    if (/^[+-]\d{2}:\d{2}$/.test(tz || "")) return local + ":00" + tz;
+    var guess = Date.parse(local + ":00Z"), off = zoneOffset(new Date(guess).toISOString(), tz);
+    off = zoneOffset(new Date(guess - off * 60000).toISOString(), tz);
+    return local + ":00" + offStr(off);
+  }
+  function fmtInZone(iso, tz) {
+    if (!iso) return "—";
+    try {
+      return new Intl.DateTimeFormat("es", { timeZone: tz, weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }).format(new Date(Date.parse(iso)));
+    } catch (e) { return fmtDate(iso); }
   }
 
   // ---------------------------------------------------------------- tarjetas
@@ -462,7 +516,7 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
   function cardHTML(m) {
     var t = m.timing, closeLine;
     closeLine = t.close_at
-      ? '<div class="closes">' + CLOCK + '<span>Cierra ' + esc(fmtDate(t.close_at)) + ' <span class="num">(' + esc(relative(t.close_at)) + ')</span></span></div>'
+      ? '<div class="closes">' + CLOCK + '<span>Cierra ' + esc(fmtDate(t.close_at)) + ', ' + esc(zoneLabel(t.timezone)) + ' <span class="num">(' + esc(relative(t.close_at)) + ')</span></span></div>'
       : '<div class="closes pending">' + CLOCK + '<span>Cierre por fijar</span></div>';
     var body;
     if (m.type === "binary") {
@@ -487,8 +541,11 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
     if (r.state === "approved") f.push('<span class="flag good">Aprobado por ' + esc(r.approved_by) + '</span>');
     if (r.expired && r.state !== "exported" && r.state !== "discarded") f.push('<span class="flag bad">Vencido</span>');
     if (r.exports.length) f.push('<span class="flag good">Exportado v' + r.exports[r.exports.length - 1].version + '</span>');
-    if (r.unexported_changes) f.push('<span class="flag warn">Cambios sin exportar</span>');
-    if (m.status === "needs_close_date") f.push('<span class="flag warn">Cierre por fijar</span>');
+    if (r.predice.published) f.push('<span class="flag good">En Predice v' + r.predice.version + '</span>');
+    if (r.lastDelivery && r.lastDelivery.status === "rejected") f.push('<span class="flag bad">Predice lo rechazó</span>');
+    if (r.lastDelivery && r.lastDelivery.status === "failed") f.push('<span class="flag bad">Falló el envío a Predice</span>');
+    if (r.unexported_changes) f.push('<span class="flag warn">Cambios sin publicar</span>');
+    if (m.status === "needs_close_date") f.push(m.timing.time_unverified ? '<span class="flag warn">Hora por verificar</span>' : '<span class="flag warn">Cierre por fijar</span>');
     if (r.edited) f.push('<span class="flag ok">Editado</span>');
     if (r.engine_incoming) f.push('<span class="flag warn">Versión nueva del motor</span>');
     if (m.flags.political) f.push('<span class="flag warn">Político</span>');
@@ -593,7 +650,7 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
     if (S.interactive) {
       mode.className = "mode";
       mode.innerHTML = '<span><span class="dot"></span>Conectado como <b>' + esc(S.user) + '</b></span>' +
-        '<span>Exportar descarga el JSON</span>' +
+        '<span>Publicar envía a Predice</span>' +
         '<span class="num">Actualizado ' + (S.lastSync ? S.lastSync.toLocaleTimeString("es") : "—") + '</span>' +
         '<button class="link-btn" id="logout">Salir</button>';
     } else {
@@ -629,7 +686,7 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
         '<dt>Cierre</dt><dd>' + (t.close_at ? esc(fmtDate(t.close_at)) : "<b>Por fijar</b>") + '</dd>' +
         '<dt>Regla de cierre</dt><dd>' + esc(t.close_explanation) + '</dd>' +
         '<dt>Resolución esperada</dt><dd>' + esc(res.expected_resolution_by ? fmtDate(res.expected_resolution_by) : "—") + '</dd>' +
-        '<dt>Zona horaria</dt><dd>UTC' + esc(t.timezone) + '</dd>' +
+        '<dt>Zona horaria del evento</dt><dd>' + esc(zoneLabel(t.timezone)) + (t.timezone && t.timezone.indexOf("/") > 0 ? ' <span class="code">' + esc(t.timezone) + '</span>' : "") + '</dd>' +
         '<dt>Fuente principal</dt><dd><a href="' + esc(res.primary_source.url) + '" target="_blank" rel="noopener">' + esc(res.primary_source.name) + '</a></dd>' +
         '<dt>Respaldo</dt><dd>' + res.backup_sources.map(function (s) { return '<a href="' + esc(s.url) + '" target="_blank" rel="noopener">' + esc(s.name) + '</a>'; }).join(", ") + '</dd>' +
         '</dl><div><h4>Instrucciones para quien resuelve</h4>' + list(res.resolver_instructions) + '</div>';
@@ -660,6 +717,23 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
         '<dt>Origen</dt><dd>' + esc(r.created_by) + '</dd><dt>Plazo de exportación</dt><dd>' + (r.export_deadline ? esc(fmtDate(toTz(r.export_deadline, r.market.timing.timezone))) + ' (cierre − ' + Math.round(r.export_margin_minutes / 60) + ' h)' : "—") + '</dd></dl></div>' + exp +
         '<div><h4>Actividad</h4><ul class="hist">' + items + '</ul></div>';
     }],
+    predice: ["Predice", function (r) {
+      var p = r.predice, names = {};
+      (S.tenants || []).forEach(function (t) { names[t.id] = t.name; });
+      var who = function (ids) { return (ids || []).map(function (id) { return names[id] || id.slice(0, 8); }).join(", ") || "—"; };
+      var OPS = { publish: "Publicar", withdraw: "Retirar" };
+      var STATUS = { sending: "enviando…", accepted: "aceptado", rejected: "rechazado", failed: "falló" };
+      var ACT = { created: "mercado nuevo", updated: "actualizado", attached: "operadores agregados", unchanged: "sin cambios", withdrawn: "anulado en Predice", already_withdrawn: "ya estaba retirado" };
+      var head = p.published
+        ? '<dl class="kv"><dt>Estado</dt><dd><b>Publicado</b>, versión ' + p.version + '</dd><dt>Operadores</dt><dd>' + esc(who(p.tenant_ids)) + '</dd><dt>Mercado en Predice</dt><dd class="code">' + esc(p.market_id || "—") + '</dd></dl>'
+        : '<p>No está publicado en Predice.</p>';
+      var items = (p.deliveries || []).map(function (d) {
+        return '<li class="' + esc(d.status) + '"><b>' + esc(OPS[d.operation] || d.operation) + ' v' + d.version + '</b> · ' + esc(STATUS[d.status] || d.status) +
+          (d.action ? ' · ' + esc(ACT[d.action] || d.action) : "") + '<br><span class="hint">' + esc(fmtUTC(d.at)) + ' · ' + esc(d.by) +
+          (d.operation === "publish" ? ' · ' + esc(who(d.tenant_ids)) : "") + '</span>' + (d.message ? '<br>' + esc(d.message) : "") + '</li>';
+      }).join("");
+      return '<div><h4>En Predice</h4>' + head + '</div>' + (items ? '<div><h4>Envíos</h4><ul class="deliv">' + items + '</ul></div>' : "");
+    }],
     json: ["JSON", function (r) {
       var opts = '<option value="current">Mercado actual</option>' + r.exports.slice().reverse().map(function (x) { return '<option value="' + x.version + '|' + esc(x.destination) + '">Exportado v' + x.version + ' (sobre completo)</option>'; }).join("");
       return '<div class="json-bar"><select class="select" id="json-which" aria-label="Qué JSON ver"' + (S.interactive ? "" : " disabled") + '>' + opts + '</select><button class="btn primary" id="copy">Copiar JSON</button></div>' +
@@ -674,8 +748,16 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
       n.push('<div class="notice warn"><span>El motor generó una versión nueva de este mercado' + (r.edited ? '. Tus ediciones se mantienen al aceptarla.' : '.') + '</span>' +
         (S.interactive ? '<span><button class="btn" data-act="accept_engine">Aceptar versión nueva</button> <button class="btn" data-act="ignore_engine">Ignorar</button></span>' : "") + '</div>');
     }
-    if (r.market.status === "needs_close_date" && r.state === "pending") n.push('<div class="notice info"><span>Falta la fecha de cierre. ' + esc(r.market.timing.close_explanation) + '</span></div>');
-    if (r.unexported_changes) n.push('<div class="notice info"><span>Tiene cambios desde la última exportación (v' + r.exports[r.exports.length - 1].version + '). Al exportarlo se enviará como actualización.</span></div>');
+    if (r.market.status === "needs_close_date" && r.state === "pending") {
+      n.push(r.market.timing.time_unverified
+        ? '<div class="notice warn"><span>' + esc(r.market.timing.close_explanation) + '</span></div>'
+        : '<div class="notice info"><span>Falta la fecha de cierre. ' + esc(r.market.timing.close_explanation) + '</span></div>');
+    }
+    if (r.unexported_changes) n.push('<div class="notice info"><span>Tiene cambios desde la última publicación. Apruébalo de nuevo y publícalo para enviar la versión nueva.</span></div>');
+    var ld = r.lastDelivery;
+    if (ld && ld.status === "rejected") n.push('<div class="notice bad"><span><b>Predice rechazó el último envío.</b> ' + esc(ld.message || "") + '</span></div>');
+    if (ld && ld.status === "failed") n.push('<div class="notice bad"><span><b>Falló el último envío a Predice.</b> ' + esc(ld.message || "") + '</span>' +
+      (S.interactive ? '<span><button class="btn" data-act="predice_retry">Reenviar</button></span>' : "") + '</div>');
     $("d-notices").innerHTML = n.join("");
   }
   function renderActions() {
@@ -692,17 +774,22 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
       else if (needs) b.push('<span class="hint">Edita el mercado para fijar el cierre y poder aprobarlo.</span>');
       else if (r.market.status === "rejected") b.push('<span class="hint">Aprobarlo anula el rechazo del motor y queda registrado.</span>');
     } else if (r.state === "approved") {
-      b.push('<button class="btn primary" data-act="export"' + (r.expired ? " disabled" : dis) + '>' + (r.exports.length ? "Exportar v" + (r.exports[r.exports.length - 1].version + 1) : "Exportar") + '</button>');
+      b.push('<button class="btn primary" data-act="predice_publish"' + (r.expired ? " disabled" : dis) + '>' + (r.predice.published ? "Publicar en Predice (versión nueva)" : "Publicar en Predice") + '</button>');
+      b.push('<button class="btn" data-act="export"' + (r.expired ? " disabled" : dis) + '>' + (r.exports.length ? "Exportar JSON v" + (r.exports[r.exports.length - 1].version + 1) : "Exportar JSON") + '</button>');
       b.push('<button class="btn" data-act="unapprove"' + dis + '>Devolver a revisión</button>');
       b.push('<button class="btn" data-act="edit"' + dis + '>Editar</button>');
       if (r.expired) b.push('<span class="hint">Ya pasó el plazo para publicarlo.</span>');
     } else if (r.state === "exported") {
+      if (!r.expired) b.push('<button class="btn primary" data-act="predice_publish"' + dis + '>' + (r.predice.published ? "Agregar operadores en Predice" : "Publicar en Predice") + '</button>');
       b.push('<button class="btn" data-act="edit"' + dis + '>Editar (crea una versión nueva)</button>');
-      b.push('<button class="btn" data-act="download">Descargar JSON</button>');
-      b.push('<span class="hint">Exportado v' + r.exports[r.exports.length - 1].version + ' por ' + esc(r.exports[r.exports.length - 1].by) + '.</span>');
+      if (r.exports.length) {
+        b.push('<button class="btn" data-act="download">Descargar JSON</button>');
+        b.push('<span class="hint">Exportado v' + r.exports[r.exports.length - 1].version + ' por ' + esc(r.exports[r.exports.length - 1].by) + '.</span>');
+      }
     } else if (r.state === "discarded") {
       b.push('<button class="btn" data-act="restore"' + (S.busy ? " disabled" : "") + '>Restaurar</button>');
     }
+    if (r.predice.published && r.state !== "discarded") b.push('<button class="btn danger" data-act="predice_withdraw"' + dis + '>Retirar de Predice</button>');
     if (r.claimed_by_me) b.push('<button class="btn" data-act="release">Dejar de revisar</button>');
     el.innerHTML = b.join("");
   }
@@ -753,11 +840,11 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
   function lines(arr) { return (arr || []).join("\n"); }
   var TITLE_MAX = 90;
   function editForm(r) {
-    var m = r.market, off = offsetMinutes(m.timing.event_start_at), tz = m.timing.timezone;
+    var m = r.market, tz = m.timing.timezone, off = zoneOffset(m.timing.close_at || m.timing.event_start_at, tz);
     var f = '<div class="form" id="edit-form">';
     f += field("title", "Título", '<input id="f-title" maxlength="140" value="' + esc(m.title) + '"><div class="counter" id="title-count"></div>', "Pregunta que verá el usuario.");
     f += field("summary", "Resumen", '<textarea id="f-summary">' + esc(m.summary) + '</textarea>');
-    f += field("close_at", "Cierre del trading (UTC" + esc(tz) + ")", '<input id="f-close" type="datetime-local" value="' + toLocalInput(m.timing.close_at, off) + '">',
+    f += field("close_at", "Cierre del trading (" + esc(zoneLabel(tz)) + ")", '<input id="f-close" type="datetime-local" value="' + toLocalInput(m.timing.close_at, off) + '">',
       "Debe ser anterior a que se conozca el resultado. " + esc(m.timing.close_explanation));
     m.outcomes.forEach(function (o) {
       var rule = (m.rules.outcome_rules.filter(function (x) { return x.outcome_id === o.id; })[0] || {}).rule || "";
@@ -778,9 +865,9 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
   }
   var formSnapshot = null;
   function readForm() {
-    var m = S.open.market, off = m.timing.timezone, ov = {};
+    var m = S.open.market, ov = {};
     ov.title = $("f-title").value; ov.summary = $("f-summary").value;
-    var c = $("f-close").value; if (c) ov.close_at = c + ":00" + off;
+    var c = $("f-close").value; if (c) ov.close_at = localToIso(c, m.timing.timezone);
     ov.outcome_labels = {}; ov.outcome_rules = {};
     Array.prototype.forEach.call(document.querySelectorAll("[data-ol]"), function (el) { ov.outcome_labels[el.dataset.ol] = el.value; });
     Array.prototype.forEach.call(document.querySelectorAll("[data-or]"), function (el) { ov.outcome_rules[el.dataset.or] = el.value; });
@@ -831,6 +918,16 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
       if (S.open.claimed_by_me) start(); else doAction("claim").then(start).catch(function () {});
       return;
     }
+    if (act === "predice_publish") { openPublish(); return; }
+    if (act === "predice_withdraw") {
+      if (!window.confirm("¿Retirar este mercado de Predice? Se anula allí y los jugadores dejan de verlo. Solo funciona si nadie apostó.")) return;
+      runPredice({ action: "withdraw", market_key: S.open.market_key, expected_version: S.open.version });
+      return;
+    }
+    if (act === "predice_retry") {
+      runPredice({ action: "retry", delivery_id: S.open.lastDelivery.id });
+      return;
+    }
     var msgs = { approve: "Aprobado", unapprove: "Devuelto a revisión", discard: "Descartado", restore: "Restaurado", export: "Exportado",
       release: "Liberado para otros editores", accept_engine: "Versión nueva aceptada", ignore_engine: "Versión nueva ignorada" };
     if (act === "download") {
@@ -862,6 +959,85 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
   $("sort").addEventListener("change", function () { S.sort = this.value; savePrefs(); renderGrid(); });
   $("country").addEventListener("change", function () { S.country = this.value; savePrefs(); renderAll(); });
   document.addEventListener("click", function (e) { if (e.target.id === "logout") { SB.auth.signOut().then(function () { location.reload(); }); } });
+
+  // ---------------------------------------------------------------- publicar en Predice
+  // El panel no habla con Predice: llama a la función Edge "predice" con la
+  // sesión del revisor, y ella firma y envía. Ver supabase/functions/predice.
+  function callPredice(body) {
+    return SB.functions.invoke("predice", { body: body }).then(function (res) {
+      if (!res.error) return res.data;
+      var ctx = res.error.context;
+      var fail = function (msg, code) { var e = new Error(msg); e.code = code; throw e; };
+      if (ctx && typeof ctx.json === "function") {
+        return ctx.json().then(function (j) { fail((j && j.error) || res.error.message, j && j.code); },
+                               function () { fail(res.error.message); });
+      }
+      fail(res.error.message);
+    });
+  }
+  function loadTenants() {
+    if (S.tenants) return Promise.resolve(S.tenants);
+    return callPredice({ action: "tenants" }).then(function (d) { S.tenants = d.tenants || []; return S.tenants; });
+  }
+  var RESULT = { created: "mercado nuevo", updated: "actualizado", attached: "operadores agregados", unchanged: "sin cambios",
+    withdrawn: "retirado", already_withdrawn: "ya estaba retirado" };
+  function runPredice(body) {
+    if (S.busy) return Promise.resolve();
+    S.busy = true; renderActions();
+    return callPredice(body).then(function (d) {
+      var x = d.delivery || {};
+      if (x.status === "accepted") toast((x.operation === "withdraw" ? "Retirado de Predice" : "Publicado en Predice") + (RESULT[x.action] ? " (" + RESULT[x.action] + ")" : ""));
+      else if (x.status === "rejected") toast("Predice lo rechazó: " + (x.message || ""), true);
+      else toast("No se pudo enviar a Predice: " + (x.message || "sin respuesta") + ". Puedes reenviarlo.", true);
+      return d;
+    }).catch(function (e) { toast(e.message, true); })
+      .finally(function () { S.busy = false; load().catch(function () {}); });
+  }
+  function eligibilityReason(m, t) {
+    var el = m.eligibility;
+    if (!el) return "Vuelve a construir el mercado con el motor actual";
+    if (el.countries.indexOf(t.country_code) === -1) {
+      var ex = (el.excluded || []).filter(function (e) { return e.country === t.country_code; })[0];
+      return ex ? "No se puede publicar en " + countryName(t.country_code) + ": " + ex.reasons.join("; ") : "El motor no tiene reglas para " + countryName(t.country_code);
+    }
+    if ((t.locale || "").split("-")[0].toLowerCase() !== (m.language || "").split("-")[0].toLowerCase()) return "Usa otro idioma (" + t.locale + ")";
+    return "";
+  }
+  function renderPublish() {
+    var r = S.open, m = r.market, done = r.predice.tenant_ids || [];
+    if (!S.tenants.length) { $("p-tenants").innerHTML = '<p class="hint">Predice no tiene operadores habilitados para el motor.</p>'; return; }
+    $("p-tenants").innerHTML = S.tenants.map(function (t) {
+      var why = eligibilityReason(m, t), on = done.indexOf(t.id) !== -1;
+      var checked = on || (!why && !done.length && t.country_code === r.country);
+      return '<label class="tenant"><input type="checkbox" data-tenant="' + esc(t.id) + '"' + (why || on ? " disabled" : "") + (checked ? " checked" : "") + '>' +
+        '<span>' + esc(t.name) + '<span class="why">' + esc(countryName(t.country_code)) + (on ? " · ya publicado" : "") + (why ? " · " + esc(why) : "") + '</span></span></label>';
+    }).join("");
+    var ok = S.tenants.filter(function (t) { return !eligibilityReason(m, t); });
+    $("p-close").innerHTML = '<h4>Cierre del mercado</h4><ul class="close-times">' + ok.map(function (t) {
+      return '<li>' + esc(t.name) + ': ' + esc(fmtInZone(r.close_at, t.timezone)) + ' (' + esc(zoneLabel(t.timezone)) + ')</li>';
+    }).join("") + '</ul><p class="hint">Inicio del evento: ' + esc(fmtInZone(m.timing.event_start_at, m.timing.timezone)) + ' (' + esc(zoneLabel(m.timing.timezone)) + '). Cada jugador verá la hora en su propia zona.</p>';
+    syncPublish();
+  }
+  function chosenTenants() {
+    return Array.prototype.filter.call(document.querySelectorAll("[data-tenant]"), function (el) { return el.checked; }).map(function (el) { return el.dataset.tenant; });
+  }
+  function syncPublish() { $("p-send").disabled = S.busy || !chosenTenants().length; }
+  function openPublish() {
+    var r = S.open;
+    $("p-what").textContent = r.market.title + (r.predice.published ? " · Ya está publicado: puedes enviar la versión nueva o agregar operadores." : "");
+    $("p-tenants").innerHTML = '<p class="hint">Cargando operadores de Predice…</p>'; $("p-close").innerHTML = ""; $("p-send").disabled = true;
+    $("pub").hidden = false; $("m-scrim").hidden = false;
+    loadTenants().then(renderPublish).catch(function (e) { $("p-tenants").innerHTML = '<div class="notice bad"><span>' + esc(e.message) + '</span></div>'; });
+  }
+  function closePublish() { $("pub").hidden = true; $("m-scrim").hidden = true; }
+  $("p-tenants").addEventListener("change", syncPublish);
+  $("p-cancel").addEventListener("click", closePublish);
+  $("m-scrim").addEventListener("click", closePublish);
+  $("p-send").addEventListener("click", function () {
+    var ids = chosenTenants(); if (!ids.length) return;
+    closePublish();
+    runPredice({ action: "publish", market_key: S.open.market_key, expected_version: S.open.version, tenant_ids: ids });
+  });
 
   // ---------------------------------------------------------------- pedir mercado
   function openAsk() {
