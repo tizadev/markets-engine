@@ -195,6 +195,23 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
 .deliv li { font-size: var(--fs-sm); border-left: 3px solid var(--line); padding-left: 8px; }
 .deliv li.accepted { border-color: var(--yes); } .deliv li.rejected, .deliv li.failed { border-color: var(--no); } .deliv li.sending { border-color: var(--warn); }
 .match { font-size: var(--fs-sm); background: var(--warn-soft); border-radius: var(--radius-small); padding: 8px 10px; }
+/* Imagen del mercado (emblema redondo de Predice) */
+.card-title { display: flex; gap: 10px; align-items: flex-start; }
+.emblem { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; flex: none; background: var(--surface-2); }
+.emblem.missing { display: grid; place-items: center; border: 1.5px dashed var(--warn); background: var(--warn-soft); color: var(--warn); font-weight: 700; font-size: var(--fs-sm); }
+.emblem.s28 { width: 28px; height: 28px; } .emblem.s20 { width: 20px; height: 20px; }
+.img-row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.img-sizes { display: flex; gap: 10px; align-items: flex-end; }
+.crop-stage { flex: none; position: relative; margin: 0 auto; touch-action: none; cursor: grab; background: #10161a; border-radius: var(--radius-small); overflow: hidden; user-select: none; outline-offset: 3px; }
+.crop-stage:active { cursor: grabbing; }
+.crop-stage canvas { display: block; }
+.crop-empty { display: grid; place-items: center; text-align: center; color: #c9d3d9; font-size: var(--fs-sm); padding: 16px; position: absolute; inset: 0; pointer-events: none; }
+.modal label.zoom { flex-direction: row; align-items: center; gap: 10px; }
+.modal label.zoom input { padding: 0; }
+.crop-previews { flex: none; display: flex; gap: 18px; align-items: flex-end; justify-content: center; margin: 0; }
+.crop-previews figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: var(--fs-xs); color: var(--ink-2); }
+.crop-previews canvas { border-radius: 50%; background: var(--surface-2); }
+.modal.dragover { outline: 2px dashed var(--accent); outline-offset: -8px; }
 
 @media (max-width: 480px) {
   .wrap { padding-inline: 16px; }
@@ -295,6 +312,32 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
   <div><h4>Operadores</h4><div class="tenant-list" id="p-tenants"></div></div>
   <div id="p-close"></div>
   <div class="form-actions" style="position:static"><button class="btn primary" id="p-send">Publicar</button><button class="btn" id="p-cancel">Cancelar</button></div>
+</div>
+<div class="modal" id="img" role="dialog" aria-modal="true" aria-labelledby="img-title" hidden>
+  <h2 id="img-title">Imagen del mercado</h2>
+  <p class="hint">Predice la muestra en un círculo pequeño junto a la pregunta. Arrastra la imagen para centrarla y usa el zoom: lo que queda fuera del círculo no se ve.</p>
+  <label>Archivo<input id="i-file" type="file" accept="image/jpeg,image/png,image/webp,image/avif,image/gif"></label>
+  <div class="crop-stage" id="i-stage" tabindex="0" role="img" aria-label="Recorte de la imagen. Arrastra o usa las flechas para moverla; + y − para acercar o alejar."><canvas id="i-canvas"></canvas><div class="crop-empty" id="i-empty">Elige un archivo o arrástralo aquí.</div></div>
+  <label class="zoom">Zoom<input id="i-zoom" type="range" min="0" max="1000" value="0" disabled></label>
+  <div class="crop-previews" aria-hidden="true">
+    <figure><canvas data-pv="36"></canvas><figcaption>36 px</figcaption></figure>
+    <figure><canvas data-pv="28"></canvas><figcaption>28 px</figcaption></figure>
+    <figure><canvas data-pv="20"></canvas><figcaption>20 px</figcaption></figure>
+  </div>
+  <p class="hint" id="i-warn"></p>
+  <label>Licencia<select id="i-license">
+    <option value="">Elige…</option>
+    <option value="propia">Propia (la hicimos nosotros)</option>
+    <option value="dominio_publico">Dominio público</option>
+    <option value="cc0">CC0</option>
+    <option value="cc_by">CC BY (con crédito al autor)</option>
+    <option value="acuerdo">Con permiso del dueño</option>
+  </select></label>
+  <label>De dónde sale<input id="i-source" maxlength="500" placeholder="Enlace a la página de la imagen, o «propia»"></label>
+  <label>Crédito del autor<input id="i-credit" maxlength="200" placeholder="Obligatorio si es CC BY"></label>
+  <p class="hint">Sin permiso, no uses fotos de agencias o medios (AP, Getty, EFE…).</p>
+  <p class="hint" id="i-state"></p>
+  <div class="form-actions" style="position:static"><button class="btn primary" id="i-save">Guardar imagen</button><button class="btn" id="i-cancel">Cancelar</button><button class="btn danger" id="i-remove" hidden>Quitar imagen</button></div>
 </div>
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
@@ -531,8 +574,17 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
     var banner = m.rejection ? '<div class="reject-banner">Rechazado: ' + esc(m.rejection.reasons.map(function (r) { return r.message; }).join(" ")) + '</div>' : "";
     return '<article class="card" aria-label="Vista previa del mercado">' + banner +
       '<div class="card-head"><span class="cat">' + esc(catLabel(m.category)) + '</span><span>' + esc(m.country) + '</span></div>' +
-      '<h3>' + esc(m.title) + '</h3>' + closeLine + body +
+      (m.type === "binary" ? '<div class="card-title">' + emblemHTML(m, 36) + '<h3>' + esc(m.title) + '</h3></div>' : '<h3>' + esc(m.title) + '</h3>') + closeLine + body +
       '<div class="card-foot"><span>Se resuelve con ' + esc(m.resolution.primary_source.name) + '</span><span>' + (m.type === "binary" ? "Sí / No" : m.outcomes.length + " opciones") + '</span></div></article>';
+  }
+  // Imagen del mercado: Predice la pinta como emblema redondo (20–36 px) en los
+  // binarios; sin ella no se pueden aprobar ni publicar.
+  function imageUrl(m) { return m.image && m.image.url ? m.image.url : ""; }
+  function needsImage(r) { return r.market.type === "binary" && !imageUrl(r.market); }
+  function emblemHTML(m, px) {
+    var u = imageUrl(m), cls = "emblem" + (px === 36 ? "" : " s" + px);
+    return u ? '<img class="' + cls + '" src="' + esc(u) + '" alt="" width="' + px + '" height="' + px + '" loading="lazy">'
+      : '<span class="' + cls + ' missing" title="Falta la imagen" aria-label="Falta la imagen">?</span>';
   }
   function stateFlags(r) {
     var m = r.market, f = [];
@@ -546,6 +598,7 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
     if (r.lastDelivery && r.lastDelivery.status === "failed") f.push('<span class="flag bad">Falló el envío a Predice</span>');
     if (r.unexported_changes) f.push('<span class="flag warn">Cambios sin publicar</span>');
     if (m.status === "needs_close_date") f.push(m.timing.time_unverified ? '<span class="flag warn">Hora por verificar</span>' : '<span class="flag warn">Cierre por fijar</span>');
+    if (needsImage(r) && r.state !== "discarded") f.push('<span class="flag warn">Falta imagen</span>');
     if (r.edited) f.push('<span class="flag ok">Editado</span>');
     if (r.engine_incoming) f.push('<span class="flag warn">Versión nueva del motor</span>');
     if (m.flags.political) f.push('<span class="flag warn">Político</span>');
@@ -667,13 +720,25 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
 
   // ---------------------------------------------------------------- detalle
   function list(items) { return items && items.length ? "<ul>" + items.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + "</ul>" : "<p>—</p>"; }
+  var LICENSES = { propia: "Propia", dominio_publico: "Dominio público", cc0: "CC0", cc_by: "CC BY", acuerdo: "Con permiso del dueño" };
+  function imageBlock(r) {
+    var m = r.market; if (m.type !== "binary") return "";
+    var can = S.interactive && r.state !== "discarded", im = m.image;
+    if (!imageUrl(m)) return '<div><h4>Imagen</h4><p>Falta la imagen. Predice la muestra junto a la pregunta y sin ella no se puede publicar.</p>' +
+      (can ? '<button class="btn primary" data-act="image">Subir imagen</button>' : "") + '</div>';
+    var src = /^https?:\/\//.test(im.source || "") ? '<a href="' + esc(im.source) + '" target="_blank" rel="noopener">' + esc(im.source) + '</a>' : esc(im.source || "—");
+    return '<div><h4>Imagen</h4><div class="img-row"><span class="img-sizes">' + emblemHTML(m, 36) + emblemHTML(m, 28) + emblemHTML(m, 20) + '</span>' +
+      (can ? '<button class="btn" data-act="image">Cambiar imagen</button>' : "") + '</div>' +
+      '<dl class="kv" style="margin-top:8px"><dt>Licencia</dt><dd>' + esc(LICENSES[im.license] || im.license || "—") + '</dd><dt>De dónde sale</dt><dd>' + src + '</dd>' +
+      (im.credit ? '<dt>Crédito</dt><dd>' + esc(im.credit) + '</dd>' : "") + '</dl></div>';
+  }
   var SECTIONS = {
     rules: ["Reglas", function (r) {
       var m = r.market;
       var rej = m.rejection ? '<div class="reject-banner">' + m.rejection.reasons.map(function (x) { return esc(x.message) + ' <span class="code">(' + esc(x.code) + ')</span>'; }).join("<br>") + '</div>' : "";
       var desc = m.description ? '<div><h4>Texto para el jugador</h4>' + m.description.split(/\n\s*\n/).map(function (p) { return '<p>' + esc(p) + '</p>'; }).join("") +
         '<p class="hint">Es lo que Predice muestra como descripción, seguido de la fuente oficial.</p></div>' : "";
-      return rej + desc + '<div><h4>Resumen</h4><p>' + esc(m.summary) + '</p></div>' +
+      return rej + imageBlock(r) + desc + '<div><h4>Resumen</h4><p>' + esc(m.summary) + '</p></div>' +
         '<div><h4>Cómo se gana</h4>' + list(m.rules.outcome_rules.map(function (x) { return x.rule; })) + '</div>' +
         '<div><h4>No cuenta</h4>' + list(m.rules.does_not_count) + '</div>' +
         '<div><h4>Casos límite</h4>' + list(m.rules.edge_cases) + '</div>' +
@@ -755,6 +820,8 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
         ? '<div class="notice warn"><span>' + esc(r.market.timing.close_explanation) + '</span></div>'
         : '<div class="notice info"><span>Falta la fecha de cierre. ' + esc(r.market.timing.close_explanation) + '</span></div>');
     }
+    if (needsImage(r) && r.state !== "discarded") n.push('<div class="notice warn"><span>Falta la imagen del mercado. Sin ella no se puede aprobar ni publicar en Predice.</span>' +
+      (S.interactive && !S.editing ? '<span><button class="btn" data-act="image">Subir imagen</button></span>' : "") + '</div>');
     if (r.unexported_changes) n.push('<div class="notice info"><span>Tiene cambios desde la última publicación. Apruébalo de nuevo y publícalo para enviar la versión nueva.</span></div>');
     var ld = r.lastDelivery;
     if (ld && ld.status === "rejected") n.push('<div class="notice bad"><span><b>Predice rechazó el último envío.</b> ' + esc(ld.message || "") + '</span></div>');
@@ -768,21 +835,23 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
     var blocked = r.claim && !r.claimed_by_me, dis = (blocked || S.busy) ? " disabled" : "", b = [];
     if (S.editing) { el.innerHTML = '<span class="hint">Editando. Guarda o cancela abajo.</span>'; return; }
     if (r.state === "pending") {
-      var needs = r.market.status === "needs_close_date";
-      b.push('<button class="btn primary" data-act="approve"' + (needs || r.expired ? " disabled" : dis) + '>Aprobar</button>');
+      var needs = r.market.status === "needs_close_date", noImg = needsImage(r);
+      b.push('<button class="btn primary" data-act="approve"' + (needs || noImg || r.expired ? " disabled" : dis) + '>Aprobar</button>');
       b.push('<button class="btn" data-act="edit"' + dis + '>Editar</button>');
       b.push('<button class="btn danger" data-act="discard"' + dis + '>Descartar</button>');
       if (r.expired) b.push('<span class="hint">Ya pasó el plazo para publicarlo. Si el cierre real es más tarde, edítalo.</span>');
       else if (needs) b.push('<span class="hint">Edita el mercado para fijar el cierre y poder aprobarlo.</span>');
+      else if (noImg) b.push('<span class="hint">Sube la imagen del mercado para poder aprobarlo.</span>');
       else if (r.market.status === "rejected") b.push('<span class="hint">Aprobarlo anula el rechazo del motor y queda registrado.</span>');
     } else if (r.state === "approved") {
-      b.push('<button class="btn primary" data-act="predice_publish"' + (r.expired ? " disabled" : dis) + '>' + (r.predice.published ? "Publicar en Predice (versión nueva)" : "Publicar en Predice") + '</button>');
+      b.push('<button class="btn primary" data-act="predice_publish"' + (r.expired || needsImage(r) ? " disabled" : dis) + '>' + (r.predice.published ? "Publicar en Predice (versión nueva)" : "Publicar en Predice") + '</button>');
       b.push('<button class="btn" data-act="export"' + (r.expired ? " disabled" : dis) + '>' + (r.exports.length ? "Exportar JSON v" + (r.exports[r.exports.length - 1].version + 1) : "Exportar JSON") + '</button>');
       b.push('<button class="btn" data-act="unapprove"' + dis + '>Devolver a revisión</button>');
       b.push('<button class="btn" data-act="edit"' + dis + '>Editar</button>');
       if (r.expired) b.push('<span class="hint">Ya pasó el plazo para publicarlo.</span>');
+      else if (needsImage(r)) b.push('<span class="hint">Sube la imagen para publicarlo. Guardarla lo devuelve a revisión.</span>');
     } else if (r.state === "exported") {
-      if (!r.expired) b.push('<button class="btn primary" data-act="predice_publish"' + dis + '>' + (r.predice.published ? "Agregar operadores en Predice" : "Publicar en Predice") + '</button>');
+      if (!r.expired) b.push('<button class="btn primary" data-act="predice_publish"' + (needsImage(r) ? " disabled" : dis) + '>' + (r.predice.published ? "Agregar operadores en Predice" : "Publicar en Predice") + '</button>');
       b.push('<button class="btn" data-act="edit"' + dis + '>Editar (crea una versión nueva)</button>');
       if (r.exports.length) {
         b.push('<button class="btn" data-act="download">Descargar JSON</button>');
@@ -860,9 +929,10 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
     f += field("early_close", "Cierre anticipado", '<textarea id="f-early">' + esc(m.rules.early_close) + '</textarea>');
     f += field("resolver_instructions", "Instrucciones para quien resuelve (una por línea)", '<textarea id="f-resolver">' + esc(lines(m.resolution.resolver_instructions)) + '</textarea>');
     f += '<div class="form-actions"><button class="btn primary" id="f-save">Guardar cambios</button><button class="btn" id="f-cancel">Cancelar</button>' +
-      (r.edited ? '<button class="btn danger" id="f-reset">Volver a lo que generó el motor</button>' : "") + '</div></div>';
+      (textEdits(r).length ? '<button class="btn danger" id="f-reset">Volver a lo que generó el motor</button>' : "") + '</div></div>';
     return f;
   }
+  function textEdits(r) { return Object.keys(r.overrides || {}).filter(function (k) { return k !== "image"; }); }
   function field(key, label, control, sub) {
     var changed = S.open.overrides && (key in S.open.overrides || (key.indexOf("outcome_") === 0 && (S.open.overrides.outcome_labels || S.open.overrides.outcome_rules)));
     return '<div class="field' + (changed ? " changed" : "") + '"><label>' + label + '</label>' + control + (sub ? '<div class="sub">' + sub + '</div>' : "") + '</div>';
@@ -893,7 +963,7 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
       doAction("save", { overrides: ov }, "Cambios guardados").then(function () { S.editing = false; S.section = "rules"; renderDrawer(); }).catch(function () {});
     });
     if ($("f-reset")) $("f-reset").addEventListener("click", function () {
-      doAction("save", { reset: Object.keys(S.open.overrides) }, "Restaurado lo que generó el motor").then(function () { S.editing = false; renderDrawer(); }).catch(function () {});
+      doAction("save", { reset: textEdits(S.open) }, "Restaurado lo que generó el motor").then(function () { S.editing = false; renderDrawer(); }).catch(function () {});
     });
   }
   function bindJson() {
@@ -924,6 +994,7 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
       return;
     }
     if (act === "predice_publish") { openPublish(); return; }
+    if (act === "image") { openImage(); return; }
     if (act === "predice_withdraw") {
       if (!window.confirm("¿Retirar este mercado de Predice? Se anula allí y los jugadores dejan de verlo. Solo funciona si nadie apostó.")) return;
       runPredice({ action: "withdraw", market_key: S.open.market_key, expected_version: S.open.version });
@@ -1042,6 +1113,156 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
     var ids = chosenTenants(); if (!ids.length) return;
     closePublish();
     runPredice({ action: "publish", market_key: S.open.market_key, expected_version: S.open.version, tenant_ids: ids });
+  });
+
+  // ---------------------------------------------------------------- imagen del mercado
+  // La persona recorta un cuadrado; Predice lo pinta en un círculo de 20–36 px.
+  // Se sube un WebP de 512 px (JPEG si el navegador no codifica WebP) al bucket
+  // público market-images, con nombre nuevo cada vez, y se guarda como edición.
+  var OUT_PX = 512, MAX_ZOOM = 6;
+  var C = { img: null, size: 288, s: 1, min: 1, x: 0, y: 0, dirty: false, url: "", drag: null };
+  function cropClamp() {
+    var w = C.img.naturalWidth * C.s, h = C.img.naturalHeight * C.s;
+    C.x = Math.min(0, Math.max(C.size - w, C.x)); C.y = Math.min(0, Math.max(C.size - h, C.y));
+  }
+  function cropSrc() { return { x: -C.x / C.s, y: -C.y / C.s, w: C.size / C.s }; }
+  function cropDraw() {
+    var cv = $("i-canvas"), dpr = window.devicePixelRatio || 1, ctx = cv.getContext("2d"), z = C.size;
+    cv.width = Math.round(z * dpr); cv.height = Math.round(z * dpr); cv.style.width = z + "px"; cv.style.height = z + "px";
+    $("i-stage").style.width = z + "px"; $("i-stage").style.height = z + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, z, z);
+    $("i-empty").hidden = !!C.img;
+    Array.prototype.forEach.call(document.querySelectorAll("[data-pv]"), function (pv) {
+      var n = +pv.dataset.pv; pv.width = Math.round(n * dpr); pv.height = Math.round(n * dpr); pv.style.width = n + "px"; pv.style.height = n + "px";
+      var p = pv.getContext("2d"); p.clearRect(0, 0, pv.width, pv.height);
+      if (C.img) { var r = cropSrc(); p.imageSmoothingQuality = "high"; p.drawImage(C.img, r.x, r.y, r.w, r.w, 0, 0, pv.width, pv.height); }
+    });
+    if (!C.img) { $("i-warn").textContent = ""; return; }
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(C.img, C.x, C.y, C.img.naturalWidth * C.s, C.img.naturalHeight * C.s);
+    ctx.fillStyle = "rgba(8, 14, 18, .6)"; ctx.beginPath(); ctx.rect(0, 0, z, z); ctx.arc(z / 2, z / 2, z / 2 - 1, 0, Math.PI * 2, true); ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, .9)"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(z / 2, z / 2, z / 2 - 1, 0, Math.PI * 2); ctx.stroke();
+    var w = cropSrc().w;
+    $("i-warn").textContent = w < 128 ? "La parte elegida mide " + Math.round(w) + " px: se verá borrosa. Aleja el zoom o usa una imagen más grande." : "";
+  }
+  function cropZoom(ns, cx, cy) {
+    if (!C.img) return;
+    ns = Math.max(C.min, Math.min(C.min * MAX_ZOOM, ns));
+    if (cx == null) { cx = C.size / 2; cy = C.size / 2; }
+    C.x = cx - (cx - C.x) * ns / C.s; C.y = cy - (cy - C.y) * ns / C.s; C.s = ns;
+    cropClamp(); C.dirty = true;
+    $("i-zoom").value = Math.round(Math.log(C.s / C.min) / Math.log(MAX_ZOOM) * 1000);
+    cropDraw();
+  }
+  function cropMove(dx, dy) { if (!C.img) return; C.x += dx; C.y += dy; cropClamp(); C.dirty = true; cropDraw(); }
+  function cropLoad(src, isNew) {
+    var img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = function () {
+      if (!img.naturalWidth) return;
+      C.img = img; C.min = Math.max(C.size / img.naturalWidth, C.size / img.naturalHeight); C.s = C.min;
+      C.x = (C.size - img.naturalWidth * C.s) / 2; C.y = (C.size - img.naturalHeight * C.s) / 2;
+      C.dirty = !!isNew; $("i-zoom").disabled = false; $("i-zoom").value = 0;
+      if (isNew && Math.min(img.naturalWidth, img.naturalHeight) < 256) toast("La imagen es pequeña (" + img.naturalWidth + "×" + img.naturalHeight + " px); puede verse borrosa.", true);
+      cropDraw();
+    };
+    img.onerror = function () {
+      if (isNew) toast("No se pudo leer esa imagen. Prueba con un JPG, PNG o WebP.", true);
+      else $("i-warn").textContent = "No se pudo cargar la imagen actual para recortarla de nuevo. Elige un archivo si quieres cambiarla.";
+    };
+    img.src = src;
+  }
+  function cropFile(file) {
+    if (!file) return;
+    if (!/^image\//.test(file.type)) { toast("Ese archivo no es una imagen.", true); return; }
+    if (file.size > 20 * 1048576) { toast("La imagen pesa más de 20 MB.", true); return; }
+    if (C.objectUrl) URL.revokeObjectURL(C.objectUrl);
+    C.objectUrl = URL.createObjectURL(file);
+    cropLoad(C.objectUrl, true);
+  }
+  function cropBlob() {
+    var r = cropSrc(), cv = document.createElement("canvas"), ctx = cv.getContext("2d");
+    cv.width = OUT_PX; cv.height = OUT_PX; ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(C.img, r.x, r.y, r.w, r.w, 0, 0, OUT_PX, OUT_PX);
+    return new Promise(function (ok, ko) {
+      cv.toBlob(function (b) {
+        if (b && b.type === "image/webp") { ok(b); return; }
+        // Sin WebP (Safari): JPEG sobre blanco, porque JPEG no tiene transparencia.
+        ctx.globalCompositeOperation = "destination-over"; ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, OUT_PX, OUT_PX);
+        cv.toBlob(function (j) { j ? ok(j) : ko(new Error("El navegador no pudo generar la imagen.")); }, "image/jpeg", 0.9);
+      }, "image/webp", 0.9);
+    });
+  }
+  function uploadImage(blob, key) {
+    var ext = blob.type === "image/webp" ? ".webp" : ".jpg";
+    var path = key.replace(/[^a-z0-9._-]/gi, "_") + "/" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8) + ext;
+    var bucket = SB.storage.from("market-images");
+    return bucket.upload(path, blob, { contentType: blob.type, upsert: false, cacheControl: "31536000" }).then(function (res) {
+      if (res.error) throw new Error("No se pudo subir la imagen: " + res.error.message);
+      return bucket.getPublicUrl(path).data.publicUrl;
+    });
+  }
+  function openImage() {
+    var r = S.open, im = r.market.image || {};
+    C.img = null; C.dirty = false; C.url = im.url || "";
+    $("i-file").value = ""; $("i-zoom").value = 0; $("i-zoom").disabled = true; $("i-warn").textContent = "";
+    $("i-license").value = im.license || ""; $("i-source").value = im.source || ""; $("i-credit").value = im.credit || "";
+    $("i-remove").hidden = !(r.overrides && r.overrides.image);
+    $("i-state").textContent = r.state === "approved" || r.state === "exported" ? "Guardar la imagen devuelve el mercado a revisión: habrá que aprobarlo de nuevo." : "";
+    $("i-save").disabled = false;
+    $("img").hidden = false; $("m-scrim").hidden = false;
+    C.size = Math.max(200, Math.min(288, $("img").clientWidth - 40));
+    cropDraw();
+    if (C.url) cropLoad(C.url, false);
+    $("i-file").focus();
+  }
+  function closeImage() { $("img").hidden = true; $("m-scrim").hidden = true; C.img = null; C.drag = null; }
+  $("i-file").addEventListener("change", function () { cropFile(this.files[0]); });
+  $("i-zoom").addEventListener("input", function () { cropZoom(C.min * Math.pow(MAX_ZOOM, this.value / 1000)); });
+  $("i-stage").addEventListener("pointerdown", function (e) {
+    if (!C.img) return; this.setPointerCapture(e.pointerId); C.drag = { x: e.clientX, y: e.clientY }; e.preventDefault();
+  });
+  $("i-stage").addEventListener("pointermove", function (e) {
+    if (!C.drag) return; cropMove(e.clientX - C.drag.x, e.clientY - C.drag.y); C.drag = { x: e.clientX, y: e.clientY };
+  });
+  ["pointerup", "pointercancel"].forEach(function (t) { $("i-stage").addEventListener(t, function () { C.drag = null; }); });
+  $("i-stage").addEventListener("wheel", function (e) {
+    if (!C.img) return; e.preventDefault();
+    var b = this.getBoundingClientRect(); cropZoom(C.s * Math.exp(-e.deltaY * 0.0015), e.clientX - b.left, e.clientY - b.top);
+  }, { passive: false });
+  $("i-stage").addEventListener("keydown", function (e) {
+    var st = e.shiftKey ? 16 : 4, mv = { ArrowLeft: [st, 0], ArrowRight: [-st, 0], ArrowUp: [0, st], ArrowDown: [0, -st] }[e.key];
+    if (mv) { cropMove(mv[0], mv[1]); e.preventDefault(); }
+    else if (e.key === "+" || e.key === "=") { cropZoom(C.s * 1.1); e.preventDefault(); }
+    else if (e.key === "-" || e.key === "_") { cropZoom(C.s / 1.1); e.preventDefault(); }
+  });
+  ["dragenter", "dragover"].forEach(function (t) { $("img").addEventListener(t, function (e) { e.preventDefault(); this.classList.add("dragover"); }); });
+  ["dragleave", "drop"].forEach(function (t) { $("img").addEventListener(t, function (e) { e.preventDefault(); this.classList.remove("dragover"); }); });
+  $("img").addEventListener("drop", function (e) { var f = e.dataTransfer && e.dataTransfer.files[0]; if (f) cropFile(f); });
+  $("i-cancel").addEventListener("click", closeImage);
+  $("m-scrim").addEventListener("click", function () { if (!$("img").hidden) closeImage(); });
+  window.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && !$("img").hidden) { e.stopImmediatePropagation(); closeImage(); }
+  }, true);
+  $("i-remove").addEventListener("click", function () {
+    if (!window.confirm("¿Quitar la imagen? Sin ella el mercado no se puede publicar.")) return;
+    closeImage();
+    doAction("save", { reset: ["image"] }, "Imagen quitada").catch(function () {});
+  });
+  $("i-save").addEventListener("click", function () {
+    var lic = $("i-license").value, src = $("i-source").value.trim(), cred = $("i-credit").value.trim();
+    if (!C.img && !C.url) { toast("Elige una imagen.", true); return; }
+    if (!lic) { toast("Indica la licencia de la imagen.", true); return; }
+    if (!src) { toast("Indica de dónde sale la imagen (enlace o «propia»).", true); return; }
+    if (lic === "cc_by" && !cred) { toast("Una imagen CC BY necesita el crédito del autor.", true); return; }
+    if (S.busy) return;
+    var btn = this, key = S.open.market_key; btn.disabled = true; btn.textContent = "Subiendo…";
+    var url = C.img && (C.dirty || !C.url) ? cropBlob().then(function (b) { return uploadImage(b, key); }) : Promise.resolve(C.url);
+    url.then(function (u) {
+      closeImage();
+      return doAction("save", { overrides: { image: { url: u, license: lic, source: src, credit: cred || null } } }, "Imagen guardada");
+    }).catch(function (e) { if (!$("img").hidden) toast(e.message, true); })
+      .finally(function () { btn.disabled = false; btn.textContent = "Guardar imagen"; });
   });
 
   // ---------------------------------------------------------------- pedir mercado
