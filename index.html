@@ -671,7 +671,9 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
     rules: ["Reglas", function (r) {
       var m = r.market;
       var rej = m.rejection ? '<div class="reject-banner">' + m.rejection.reasons.map(function (x) { return esc(x.message) + ' <span class="code">(' + esc(x.code) + ')</span>'; }).join("<br>") + '</div>' : "";
-      return rej + '<div><h4>Resumen</h4><p>' + esc(m.summary) + '</p></div>' +
+      var desc = m.description ? '<div><h4>Texto para el jugador</h4>' + m.description.split(/\n\s*\n/).map(function (p) { return '<p>' + esc(p) + '</p>'; }).join("") +
+        '<p class="hint">Es lo que Predice muestra como descripción, seguido de la fuente oficial.</p></div>' : "";
+      return rej + desc + '<div><h4>Resumen</h4><p>' + esc(m.summary) + '</p></div>' +
         '<div><h4>Cómo se gana</h4>' + list(m.rules.outcome_rules.map(function (x) { return x.rule; })) + '</div>' +
         '<div><h4>No cuenta</h4>' + list(m.rules.does_not_count) + '</div>' +
         '<div><h4>Casos límite</h4>' + list(m.rules.edge_cases) + '</div>' +
@@ -844,6 +846,8 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
     var f = '<div class="form" id="edit-form">';
     f += field("title", "Título", '<input id="f-title" maxlength="140" value="' + esc(m.title) + '"><div class="counter" id="title-count"></div>', "Pregunta que verá el usuario.");
     f += field("summary", "Resumen", '<textarea id="f-summary">' + esc(m.summary) + '</textarea>');
+    if (m.description !== undefined) f += field("description", "Texto para el jugador", '<textarea id="f-description" rows="8">' + esc(m.description) + '</textarea>',
+      "Lo que Predice muestra como descripción. Separa los párrafos con una línea en blanco. Sin horas: Predice muestra la hora en la zona de cada jugador.");
     f += field("close_at", "Cierre del trading (" + esc(zoneLabel(tz)) + ")", '<input id="f-close" type="datetime-local" value="' + toLocalInput(m.timing.close_at, off) + '">',
       "Debe ser anterior a que se conozca el resultado. " + esc(m.timing.close_explanation));
     m.outcomes.forEach(function (o) {
@@ -867,6 +871,7 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
   function readForm() {
     var m = S.open.market, ov = {};
     ov.title = $("f-title").value; ov.summary = $("f-summary").value;
+    if ($("f-description")) ov.description = $("f-description").value;
     var c = $("f-close").value; if (c) ov.close_at = localToIso(c, m.timing.timezone);
     ov.outcome_labels = {}; ov.outcome_rules = {};
     Array.prototype.forEach.call(document.querySelectorAll("[data-ol]"), function (el) { ov.outcome_labels[el.dataset.ol] = el.value; });
