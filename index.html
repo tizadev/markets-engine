@@ -307,6 +307,13 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
   <p class="hint" id="p-what"></p>
   <div><h4>Operadores</h4><div class="tenant-list" id="p-tenants"></div></div>
   <div id="p-close"></div>
+  <label>Destacar en los operadores elegidos<select id="p-feature">
+    <option value="">No</option>
+    <option value="24">Durante 24 h</option>
+    <option value="48">Durante 48 h</option>
+    <option value="open">Hasta que cierre</option>
+  </select></label>
+  <p class="hint" id="p-feature-hint">Un destacado entra primero en la lista de destacados de cada operador, justo debajo de los 3 más populares, y los demás bajan un lugar. Al vencer el plazo vuelve al orden normal.</p>
   <div class="form-actions" style="position:static"><button class="btn primary" id="p-send">Publicar</button><button class="btn" id="p-cancel">Cancelar</button></div>
 </div>
 <div class="modal" id="img" role="dialog" aria-modal="true" aria-labelledby="img-title" hidden>
@@ -1038,7 +1045,8 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
     S.busy = true; renderActions();
     return callPredice(body).then(function (d) {
       var x = d.delivery || {};
-      if (x.status === "accepted") toast((x.operation === "withdraw" ? "Retirado de Predice" : "Publicado en Predice") + (RESULT[x.action] ? " (" + RESULT[x.action] + ")" : ""));
+      if (x.status === "accepted" && x.message) toast(x.message, true);
+      else if (x.status === "accepted") toast((x.operation === "withdraw" ? "Retirado de Predice" : "Publicado en Predice") + (RESULT[x.action] ? " (" + RESULT[x.action] + ")" : ""));
       else if (x.status === "rejected") toast("Predice lo rechazó: " + (x.message || ""), true);
       else toast("No se pudo enviar a Predice: " + (x.message || "sin respuesta") + ". Puedes reenviarlo.", true);
       return d;
@@ -1078,6 +1086,7 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
     var r = S.open;
     $("p-what").textContent = r.market.title + (r.predice.published ? " · Ya está publicado: puedes enviar la versión nueva o agregar operadores." : "");
     $("p-tenants").innerHTML = '<p class="hint">Cargando operadores de Predice…</p>'; $("p-close").innerHTML = ""; $("p-send").disabled = true;
+    $("p-feature").value = "";
     $("pub").hidden = false; $("m-scrim").hidden = false;
     loadTenants().then(renderPublish).catch(function (e) { $("p-tenants").innerHTML = '<div class="notice bad"><span>' + esc(e.message) + '</span></div>'; });
   }
@@ -1087,8 +1096,11 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
   $("m-scrim").addEventListener("click", closePublish);
   $("p-send").addEventListener("click", function () {
     var ids = chosenTenants(); if (!ids.length) return;
+    var f = $("p-feature").value, body = { action: "publish", market_key: S.open.market_key, expected_version: S.open.version, tenant_ids: ids };
+    if (f === "open") body.featured = { until: null };
+    else if (f) body.featured = { until: new Date(Date.now() + parseInt(f, 10) * 36e5).toISOString() };
     closePublish();
-    runPredice({ action: "publish", market_key: S.open.market_key, expected_version: S.open.version, tenant_ids: ids });
+    runPredice(body);
   });
 
   // ---------------------------------------------------------------- imagen del mercado
