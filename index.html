@@ -182,6 +182,12 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
 .req { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .req p { margin: 0; overflow-wrap: anywhere; }
 .req .meta { font-size: var(--fs-xs); color: var(--ink-2); }
+.idea h3 { margin: 0; font-size: var(--fs-md); line-height: 1.35; overflow-wrap: anywhere; }
+.idea .lbl { font-size: var(--fs-xs); font-weight: 600; color: var(--ink-2); text-transform: uppercase; letter-spacing: .03em; margin-top: 4px; }
+.idea ul { margin: 0; padding-left: 18px; }
+.idea details { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 4px; }
+.idea summary { cursor: pointer; font-weight: 600; font-size: var(--fs-sm); }
+.idea .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
 .modal { position: fixed; z-index: 12; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(520px, calc(100% - 24px)); max-height: calc(100% - 24px); overflow: auto; background: var(--surface); border-radius: var(--radius-card); border: 1px solid var(--line); padding: 20px; display: flex; flex-direction: column; gap: 12px; }
 .modal h2 { margin: 0; font-size: var(--fs-lg); }
 .modal label { font-size: var(--fs-sm); font-weight: 600; display: flex; flex-direction: column; gap: 4px; }
@@ -248,6 +254,7 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
     <button class="tab" role="tab" data-col="approved" aria-selected="false">Aprobados<span class="count" data-count="approved"></span></button>
     <button class="tab" role="tab" data-col="exported" aria-selected="false">Exportados<span class="count" data-count="exported"></span></button>
     <button class="tab" role="tab" data-col="expired" aria-selected="false">Vencidos<span class="count" data-count="expired"></span></button>
+    <button class="tab" role="tab" data-col="ideas" aria-selected="false">Ideas<span class="count" data-count="ideas"></span></button>
     <button class="tab" role="tab" data-col="requests" aria-selected="false">Peticiones<span class="count" data-count="requests"></span></button>
   </div>
   <p class="tab-note" id="tab-note"></p>
@@ -336,7 +343,7 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
   var SB = window.supabase.createClient(CFG.supabase_url, CFG.supabase_key, { auth: { persistSession: true, autoRefreshToken: true } });
   var S = {
     interactive: true, me: null, user: null, store: "Supabase", exportEndpoint: false,
-    records: [], errors: [], requests: [], tenants: null,
+    records: [], errors: [], requests: [], ideas: [], tenants: null,
     col: "review", filter: "all", q: "", cat: "", country: "", sort: "deadline",
     open: null, section: "rules", editing: false, busy: false, lastSync: null
   };
@@ -349,8 +356,15 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
     approved: { label: "Aprobados", note: "Listos para publicar en Predice o exportar." },
     exported: { label: "Exportados", note: "Publicados en Predice o exportados. Si editas uno, vuelve a revisión y se publica como versión nueva." },
     expired: { label: "Vencidos", note: "Ya no da tiempo a publicarlos: falta menos que el margen de exportación para su cierre." },
+    ideas: { label: "Ideas", note: "Lo que el motor descubrió y todavía no puede ofrecer porque le falta un molde. Aprueba la idea (y su molde) y la próxima corrida la convierte en mercados; descártala si no tiene sentido." },
     requests: { label: "Peticiones", note: "Lo que el equipo ha pedido al motor y qué pasó con cada petición." }
   };
+  var IDEA_STATUS = { "new": ["Por revisar", "warn"], approved: ["Aprobada: se construye en la próxima corrida", "ok"], discarded: ["Descartada", ""],
+    built: ["Convertida en mercados", "good"], not_possible: ["No se pudo construir", "bad"] };
+  var IDEA_ORDER = { "new": 0, approved: 1, built: 2, not_possible: 3, discarded: 4 };
+  var AREA_LABELS = { futbol: "Fútbol", beisbol: "Béisbol", baloncesto: "Baloncesto", deportes_otros: "Otros deportes", musica: "Música",
+    cine_tv: "Cine, series y streaming", certamenes: "Certámenes", tendencias: "Redes y tendencias", tecnologia: "Tecnología y ciencia",
+    clima_naturaleza: "Clima y naturaleza", cultura_gastronomia: "Cultura, ferias y gastronomía", eventos_globales: "Eventos globales", otros: "Otros" };
   var REQ_STATUS = { queued: ["En cola", "warn"], working: ["Buscando", "ok"], created: ["Creado", "good"], existing: ["Ya existía", "good"],
     improved: ["Mejorado", "good"], not_possible: ["No se pudo", "bad"] };
   var CAT_LABELS = {
@@ -451,10 +465,13 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
   function load() {
     var q1 = SB.from("market_board").select("*");
     var q2 = SB.from("requests").select("*").order("created_at", { ascending: false }).limit(200);
-    return Promise.all([q1, q2]).then(function (res) {
+    var q3 = SB.from("ideas").select("*").order("last_seen_at", { ascending: false }).limit(300);
+    return Promise.all([q1, q2, q3]).then(function (res) {
       if (res[0].error) throw sbErr(res[0].error);
       if (res[1].error) throw sbErr(res[1].error);
       S.records = res[0].data.map(toView); S.requests = res[1].data; S.lastSync = new Date();
+      // Las ideas son un extra: si la tabla aún no existe, el panel sigue funcionando sin ellas.
+      S.ideas = res[2].error ? [] : res[2].data;
       if (S.open) { var cur = find(S.open.market_key); if (cur && !S.editing) S.open = cur; }
       renderAll();
     });
@@ -644,11 +661,61 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
         '<div class="meta">Pedido ' + esc(fmtUTC(q.created_at)) + (q.updated_at !== q.created_at ? ' · actualizado ' + esc(fmtUTC(q.updated_at)) : "") + '</div></article>';
     }).join("");
   }
+  function renderIdeas() {
+    var list = S.ideas.filter(function (d) { return !S.country || d.country === S.country; });
+    if (!list.length) return '<div class="empty">El motor todavía no ha traído ideas. Aparecen aquí cuando una corrida encuentra algo que vale la pena ofrecer y no tiene molde.</div>';
+    list.sort(function (a, b) { var oa = IDEA_ORDER[a.status], ob = IDEA_ORDER[b.status]; if (oa !== ob) return oa - ob; return a.last_seen_at < b.last_seen_at ? 1 : -1; });
+    return list.map(function (d) {
+      var st = IDEA_STATUS[d.status] || [d.status, ""];
+      var m = d.mold_summary;
+      var srcs = (d.sources || []).map(function (x) { return '<li><a href="' + esc(x.url) + '" target="_blank" rel="noopener">' + esc(x.title || x.url) + '</a></li>'; }).join("");
+      var links = (d.result_keys || []).map(function (k) { return find(k) ? '<button class="link-btn" data-open="' + esc(k) + '">' + esc(find(k).market.title) + '</button>' : '<span class="code">' + esc(k) + '</span>'; }).join("<br>");
+      var moldHTML = m ? '<details><summary>Molde ' + (m.status === "approved" ? "aprobado" : "propuesto") + ': ' + esc(m.name || m.id) + '</summary>' +
+          (m.description ? '<p>' + esc(m.description) + '</p>' : "") +
+          (m.title ? '<div class="lbl">Título</div><p class="code">' + esc(m.title) + '</p>' : "") +
+          ((m.player_description || []).length ? '<div class="lbl">Lo que ve el jugador</div><ul>' + m.player_description.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join("") + '</ul>' : "") +
+          (m.close_explanation ? '<div class="lbl">Cierre</div><p>' + esc(m.close_explanation) + '</p>' : "") +
+          (m.primary_source ? '<div class="lbl">Fuente que resuelve</div><p class="code">' + esc(m.primary_source) + '</p>' : "") +
+          (m.file ? '<p class="meta">Archivo: <span class="code">' + esc(m.file) + '</span></p>' : "") + '</details>'
+        : '<p class="meta">Sin molde propuesto todavía: si la apruebas, la próxima corrida propone uno y lo construye.</p>';
+      var acts = [];
+      if (S.interactive) {
+        if (d.status === "new" || d.status === "discarded") acts.push('<button class="btn primary" data-idea="approve" data-id="' + esc(d.id) + '">' + (m && m.status !== "approved" ? "Aprobar idea y molde" : "Aprobar idea") + '</button>');
+        if (d.status === "new" || d.status === "approved") acts.push('<button class="btn" data-idea="discard" data-id="' + esc(d.id) + '">Descartar</button>');
+        if (d.status === "approved" || d.status === "discarded" || d.status === "not_possible") acts.push('<button class="btn" data-idea="reopen" data-id="' + esc(d.id) + '">Volver a por revisar</button>');
+      }
+      return '<article class="req idea"><div class="flags"><span class="flag ' + st[1] + '">' + esc(st[0]) + '</span><span class="flag">' + esc(AREA_LABELS[d.area] || d.area) + '</span>' +
+        '<span class="flag">' + esc(countryName(d.country)) + '</span>' + (d.event_date ? '<span class="flag">' + esc(ideaDay(d.event_date)) + '</span>' : "") + '</div>' +
+        '<h3>' + esc(d.question) + '</h3>' +
+        (d.why ? '<div class="lbl">Por qué interesa</div><p>' + esc(d.why) + '</p>' : "") +
+        (d.resolution ? '<div class="lbl">Cómo se resolvería</div><p>' + esc(d.resolution) + '</p>' : "") +
+        (srcs ? '<div class="lbl">Fuentes</div><ul>' + srcs + '</ul>' : "") + moldHTML +
+        (d.decision_note ? '<p class="meta">Nota: ' + esc(d.decision_note) + '</p>' : "") +
+        (d.engine_reason ? '<p class="meta">Motor: ' + esc(d.engine_reason) + '</p>' : "") + (links ? '<div>' + links + '</div>' : "") +
+        (acts.length ? '<div class="acts">' + acts.join("") + '</div>' : "") +
+        '<div class="meta">Vista por primera vez ' + esc(fmtUTC(d.first_seen_at)) + (d.seen_count > 1 ? ' · el motor la ha encontrado ' + d.seen_count + ' veces' : "") +
+        (d.decided_at ? ' · decidida ' + esc(fmtUTC(d.decided_at)) : "") + '</div></article>';
+    }).join("");
+  }
+  // Fecha sin hora (AAAA-MM-DD): se muestra tal cual, sin pasarla por ninguna zona.
+  function ideaDay(day) { var p = parts(day + "T12:00:00Z", 0); return p.day + " " + p.date + "-" + p.mon + "-" + p.y; }
+  function ideaAct(id, action) {
+    var note = null;
+    if (action === "discard") { note = window.prompt("¿Por qué la descartas? (opcional, ayuda al motor a no traer cosas parecidas)", ""); if (note === null) return; }
+    if (action === "approve") { var d = S.ideas.filter(function (x) { return x.id === id; })[0]; if (d && d.mold_summary && d.mold_summary.status !== "approved" && !window.confirm("Al aprobar la idea apruebas también su molde. La próxima corrida lo activa y crea los mercados, que llegarán a Por revisar. ¿Seguir?")) return; }
+    SB.rpc("idea_act", { p_id: id, p_action: action, p_note: note }).then(function (res) {
+      if (res.error) throw sbErr(res.error);
+      for (var i = 0; i < S.ideas.length; i++) if (S.ideas[i].id === id) S.ideas[i] = res.data;
+      toast(action === "approve" ? "Idea aprobada: la próxima corrida la construye." : action === "discard" ? "Idea descartada." : "Idea de vuelta en por revisar.");
+      renderAll();
+    }).catch(function (e) { toast(e.message, true); });
+  }
   function renderGrid() {
     var grid = $("grid");
     $("errors-section").hidden = true;
-    document.querySelector(".toolbar:not([style])").hidden = S.col === "requests";
+    document.querySelector(".toolbar:not([style])").hidden = S.col === "requests" || S.col === "ideas";
     if (S.col === "requests") { grid.innerHTML = renderRequests(); return; }
+    if (S.col === "ideas") { grid.innerHTML = renderIdeas(); return; }
     var list = visible();
     if (!S.records.length) {
       grid.innerHTML = '<div class="empty">Todavía no hay mercados. El motor los irá trayendo en sus corridas, o puedes pedir uno con <b>Pedir mercado</b>.</div>';
@@ -668,8 +735,9 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
     }
   }
   function renderHeader() {
-    var count = { review: 0, rejected: 0, approved: 0, exported: 0, expired: 0, requests: 0 };
+    var count = { review: 0, rejected: 0, approved: 0, exported: 0, expired: 0, requests: 0, ideas: 0 };
     S.records.forEach(function (r) { if (!S.country || r.country === S.country) count[r.column]++; });
+    count.ideas = S.ideas.filter(function (d) { return d.status === "new" && (!S.country || d.country === S.country); }).length;
     count.requests = S.requests.filter(function (q) { return (q.status === "queued" || q.status === "working") && (!S.country || q.country === S.country); }).length;
     Array.prototype.forEach.call(document.querySelectorAll("[data-count]"), function (el) {
       var c = el.dataset.count; el.textContent = count[c] + (c === "rejected" && S.errors.length ? " + " + S.errors.length : "");
@@ -681,7 +749,7 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
     var needs = S.records.filter(function (r) { return inC(r) && r.column === "review" && r.market.status === "needs_close_date"; }).length;
     var stats = [[count.review, "por revisar"], [soon, "vencen en 48 h"], [needs, "cierre por fijar"], [count.approved, "por exportar"], [count.exported, "exportados"]];
     $("stats").innerHTML = stats.map(function (s) { return '<div class="stat"><b>' + s[0] + '</b><span>' + s[1] + '</span></div>'; }).join("");
-    var cs = Array.from(new Set(S.records.map(function (r) { return r.country; }).concat(S.requests.map(function (q) { return q.country; })))).sort();
+    var cs = Array.from(new Set(S.records.map(function (r) { return r.country; }).concat(S.requests.map(function (q) { return q.country; })).concat(S.ideas.map(function (d) { return d.country; })))).sort();
     var csel = $("country");
     csel.innerHTML = '<option value="">Todos los países</option>' + cs.map(function (c) { return '<option value="' + esc(c) + '">' + esc(countryName(c)) + '</option>'; }).join("");
     csel.value = S.country;
@@ -969,6 +1037,7 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
   // ---------------------------------------------------------------- eventos
   document.addEventListener("click", function (e) {
     var o = e.target.closest("[data-open]"); if (o) { openDetail(o.dataset.open); return; }
+    var ib = e.target.closest("[data-idea]"); if (ib) { if (!ib.disabled) ideaAct(ib.dataset.id, ib.dataset.idea); return; }
     var a = e.target.closest("[data-act]"); if (!a || a.disabled) return;
     var act = a.dataset.act;
     if (act === "edit") {
