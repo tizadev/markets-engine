@@ -347,8 +347,8 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
     col: "review", filter: "all", q: "", cat: "", country: "", sort: "deadline",
     open: null, section: "rules", editing: false, busy: false, lastSync: null
   };
-  try { var saved = JSON.parse(localStorage.getItem("motor-panel") || "{}"); if (saved.sort) S.sort = saved.sort; if (saved.country != null) S.country = saved.country; } catch (e) {}
-  function savePrefs() { try { localStorage.setItem("motor-panel", JSON.stringify({ sort: S.sort, country: S.country })); } catch (e) {} }
+  try { var saved = JSON.parse(localStorage.getItem("motor-panel") || "{}"); if (saved.sort) S.sort = saved.sort; if (saved.country != null) S.country = saved.country; if (saved.cat) S.cat = saved.cat; } catch (e) {}
+  function savePrefs() { try { localStorage.setItem("motor-panel", JSON.stringify({ sort: S.sort, country: S.country, cat: S.cat })); } catch (e) {} }
 
   var COLS = {
     review: { label: "Por revisar", note: "Mercados que el motor propone. Revísalos, edítalos si hace falta y apruébalos." },
@@ -367,6 +367,7 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
     clima_naturaleza: "Clima y naturaleza", cultura_gastronomia: "Cultura, ferias y gastronomía", eventos_globales: "Eventos globales", otros: "Otros" };
   var REQ_STATUS = { queued: ["En cola", "warn"], working: ["Buscando", "ok"], created: ["Creado", "good"], existing: ["Ya existía", "good"],
     improved: ["Mejorado", "good"], not_possible: ["No se pudo", "bad"] };
+  var FAMILY_LABELS = { "deportes.beisbol": "Béisbol (LVBP y MLB)" };
   var CAT_LABELS = {
     "deportes.beisbol.lvbp": "Béisbol LVBP", "deportes.beisbol.mlb": "MLB", "deportes.premios": "Premios",
     "entretenimiento.certamenes": "Certámenes", "entretenimiento.musica.eventos": "Música y eventos",
@@ -622,6 +623,11 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
 
   // ---------------------------------------------------------------- listas
   function lastActivity(r) { var h = r.history; return h.length ? h[h.length - 1].at : r.created_at; }
+  // "x" = solo esa categoría; "!x" = todo menos esa categoría o familia (deportes.beisbol oculta LVBP y MLB).
+  function catMatch(cat, sel) {
+    if (sel.charAt(0) !== "!") return cat === sel;
+    var x = sel.slice(1); return !(cat === x || cat.indexOf(x + ".") === 0);
+  }
   function visible() {
     var q = S.q.trim().toLowerCase();
     var list = S.records.filter(function (r) {
@@ -631,7 +637,7 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
       if (S.filter === "edited" && !r.edited) return false;
       if (S.filter === "incoming" && !r.engine_incoming) return false;
       if (S.filter === "single" && !m.flags.single_source) return false;
-      if (S.cat && m.category !== S.cat) return false;
+      if (S.cat && !catMatch(m.category, S.cat)) return false;
       if (S.country && r.country !== S.country) return false;
       if (q) {
         var hay = (m.title + " " + m.summary + " " + r.market_key + " " + m.outcomes.map(function (o) { return o.label; }).join(" ")).toLowerCase();
@@ -767,8 +773,13 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
     }
     var cats = Array.from(new Set(S.records.map(function (r) { return r.market.category; }))).sort();
     var sel = $("cat"), prev = S.cat;
-    sel.innerHTML = '<option value="">Todas las categorías</option>' + cats.map(function (c) { return '<option value="' + esc(c) + '">' + esc(catLabel(c)) + '</option>'; }).join("");
-    sel.value = prev; $("sort").value = S.sort;
+    var fams = {};
+    cats.forEach(function (c) { var f = c.split(".").slice(0, 2).join("."); if (f !== c) fams[f] = (fams[f] || 0) + 1; });
+    var hide = Object.keys(fams).filter(function (f) { return fams[f] > 1; }).map(function (f) { return ["!" + f, FAMILY_LABELS[f] || catLabel(f)]; })
+      .concat(cats.map(function (c) { return ["!" + c, catLabel(c)]; }));
+    sel.innerHTML = '<option value="">Todas las categorías</option><optgroup label="Solo">' + cats.map(function (c) { return '<option value="' + esc(c) + '">' + esc(catLabel(c)) + '</option>'; }).join("") + '</optgroup>' +
+      '<optgroup label="Ocultar">' + hide.map(function (h) { return '<option value="' + esc(h[0]) + '">Todo menos ' + esc(h[1]) + '</option>'; }).join("") + '</optgroup>';
+    sel.value = prev; if (S.records.length && sel.value !== prev) { S.cat = ""; sel.value = ""; } $("sort").value = S.sort;
     $("foot").textContent = "Precios iniciales equitativos (1/N); el pricing real lo fija otra instancia. Un mercado se puede exportar hasta su cierre menos el margen (12 h por defecto).";
   }
   function renderAll() { renderHeader(); renderGrid(); if (S.open && !$("drawer").hidden) renderDrawer(); }
@@ -1083,7 +1094,7 @@ footer.foot { margin-top: 40px; font-size: var(--fs-xs); color: var(--ink-2); }
     renderGrid();
   });
   $("q").addEventListener("input", function () { S.q = this.value; renderGrid(); });
-  $("cat").addEventListener("change", function () { S.cat = this.value; renderGrid(); });
+  $("cat").addEventListener("change", function () { S.cat = this.value; savePrefs(); renderGrid(); });
   $("sort").addEventListener("change", function () { S.sort = this.value; savePrefs(); renderGrid(); });
   $("country").addEventListener("change", function () { S.country = this.value; savePrefs(); renderAll(); });
   document.addEventListener("click", function (e) { if (e.target.id === "logout") { SB.auth.signOut().then(function () { location.reload(); }); } });
